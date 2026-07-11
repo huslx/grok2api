@@ -216,10 +216,25 @@ docker compose -f docker-compose.warp.yml up -d
 
 ```bash
 git clone https://github.com/jiujiu532/grok2api
-cd grok2api/grok2api-main/grok2api-main
-cp .env.example .env && uv sync
+cd grok2api
+cp .env.example .env
+
+# 安装依赖（首次）
+uv sync
+
+# 若 PyPI 较慢，可用国内镜像：
+# uv sync --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 启动（前台，日志直接输出到终端）
 uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
+
+# 或使用 venv 里的 granian：
+# .venv/bin/granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
 ```
+
+> 端口默认 `8000`。若本机已有 Docker 版在跑，先停掉再启动本地服务：`docker stop grok2api`。
+>
+> 依赖装好后，再次启动通常只需执行上面的 `granian` 命令即可，无需重复 `uv sync`。
 
 ---
 
