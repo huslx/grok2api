@@ -48,6 +48,13 @@ LIVEKIT_TOKENS    = f"{BASE}/rest/livekit/tokens"              # POST
 CONSOLE_RESPONSES = f"{CONSOLE_BASE}/v1/responses"             # POST (OpenAI Responses API)
 CONSOLE_CHAT      = f"{CONSOLE_BASE}/v1/chat/completions"      # POST (OpenAI Chat API)
 
+# ── Grok CLI chat proxy（OIDC access_token + grok-cli headers）────────────
+# 参考 HM2899/grokcli-2api：会话态走 cli-chat-proxy，默认模型 grok-4.5
+CLI_CHAT_PROXY_BASE = "https://cli-chat-proxy.grok.com/v1"
+CLI_CHAT            = f"{CLI_CHAT_PROXY_BASE}/chat/completions"
+CLI_MODELS          = f"{CLI_CHAT_PROXY_BASE}/models"
+CLI_BILLING         = f"{CLI_CHAT_PROXY_BASE}/billing"
+
 
 __all__ = [
     "BASE", "ASSETS_CDN", "CONSOLE_BASE",
@@ -58,4 +65,5 @@ __all__ = [
     "MEDIA_POST", "MEDIA_POST_LINK", "VIDEO_UPSCALE",
     "WS_IMAGINE", "WS_LIVEKIT", "LIVEKIT_TOKENS",
     "CONSOLE_RESPONSES", "CONSOLE_CHAT",
+    "CLI_CHAT_PROXY_BASE", "CLI_CHAT", "CLI_MODELS", "CLI_BILLING",
 ]

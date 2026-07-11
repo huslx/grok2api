@@ -284,6 +284,24 @@ basic表示free账号，spuer和heavy 为付费
 | `grok-4.3-low` | low（固定） | basic |
 | `grok-4.3-medium` | medium（固定） | basic |
 | `grok-4.3-high` | high（固定） | basic |
+| `grok-4.5` / `grok-4.5-console` | **CLI 路径**（`cli-chat-proxy.grok.com`，SSO→OIDC，参考 [grokcli-2api](https://github.com/HM2899/grokcli-2api)） | basic |
+
+> **Grok 4.5 说明**：走 `cli-chat-proxy.grok.com`，请求时把账号 SSO 换成 OIDC `access_token`（device flow），并附加 `X-XAI-Token-Auth` / `x-grok-client-*` 头。若上游返回 `403 permission-denied`，通常是该账号 **billing limit=0 / 无 cli-chat 权限**（免费 SSO 常见）；需使用有 Grok CLI 额度的账号（设备码登录 / 协议注册账号等，与 grokcli-2api 同类凭证）。
+>
+> **批量 SSO→OIDC**（与 grokcli-2api / grok-build-auth 同协议）：
+>
+> ```bash
+> # 从本地 accounts.db 转换（建议先小批量试）
+> uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
+>
+> # 从文件（每行一个 SSO，或 邮箱----sso）
+> uv run python scripts/sso_to_oidc.py --sso-file ./sso.txt --workers 4
+>
+> # 同时写出 grokcli 兼容 auth.json
+> uv run python scripts/sso_to_oidc.py --from-db --limit 20 --auth-json data/auth.json
+> ```
+>
+> 结果写入 `data/oidc_auth.json`，运行时 `cli_chat` 会优先复用，避免每次请求都重新 device flow。
 | `grok-4.20-0309-console` | 默认 | basic |
 | `grok-4.20-0309-reasoning-console` | 固定 reasoning | basic |
 | `grok-4.20-0309-non-reasoning-console` | 无 reasoning | basic |

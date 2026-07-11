@@ -48,6 +48,8 @@ CONSOLE_MODELS: dict[str, str] = {
     "grok-4.3-low":                         "grok-4.3",
     "grok-4.3-medium":                      "grok-4.3",
     "grok-4.3-high":                        "grok-4.3",
+    "grok-4.5":                             "grok-4.5",
+    "grok-4.5-console":                     "grok-4.5",
     "grok-4.20-0309-reasoning-console":     "grok-4.20-0309-reasoning",
     "grok-4.20-0309-console":               "grok-4.20-0309",
     "grok-4.20-0309-non-reasoning-console": "grok-4.20-0309-non-reasoning",
@@ -62,6 +64,7 @@ CONSOLE_MODELS: dict[str, str] = {
 # 需要附带 reasoning 字段的模型（grok-4.3 系列需要，grok-4.20 系列不需要）
 _MODELS_WITH_REASONING_FIELD: frozenset[str] = frozenset({
     "grok-4.3",
+    "grok-4.5",
     "grok-4.20-multi-agent-0309",
 })
 
@@ -89,6 +92,7 @@ _MODELS_WITH_SEARCH_TOOLS: frozenset[str] = frozenset({
     "grok-4.20-0309-reasoning",
     "grok-4.20-0309-non-reasoning",
     "grok-4.3",
+    "grok-4.5",
     "grok-build-0.1",
 })
 

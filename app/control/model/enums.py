@@ -41,6 +41,7 @@ class Capability(IntFlag):
     VOICE = 16
     ASSET = 32
     CONSOLE_CHAT = 64  # 通过 console.x.ai/v1/responses 路由
+    CLI_CHAT = 128  # 通过 cli-chat-proxy.grok.com（OIDC + grok-cli headers）
 
 
 # Human-readable mode strings in API order.

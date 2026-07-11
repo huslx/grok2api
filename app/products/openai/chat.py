@@ -477,6 +477,21 @@ async def completions(
         len(messages),
     )
 
+    # ── CLI chat-proxy 路由 (cli-chat-proxy.grok.com) ────────────────────────
+    # 参考 HM2899/grokcli-2api：SSO→OIDC + X-XAI-Token-Auth / x-grok-client-*
+    if spec.is_cli_chat():
+        from .cli_chat import completions as cli_completions
+        return await cli_completions(
+            model=model,
+            messages=messages,
+            stream=is_stream,
+            emit_think=emit_think,
+            temperature=temperature,
+            top_p=top_p,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
     # ── Console API 路由 (console.x.ai/v1/responses) ─────────────────────────
     if spec.is_console_chat():
         from .console_chat import completions as console_completions
