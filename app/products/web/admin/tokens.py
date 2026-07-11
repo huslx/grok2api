@@ -95,6 +95,12 @@ class ToggleTokensDisabledRequest(BaseModel):
     disabled: bool
 
 
+class OidcConvertRequest(BaseModel):
+    """Enqueue SSO→OIDC conversion on the paced background worker."""
+
+    tokens: list[str] = []
+
+
 class TokenImportItem(BaseModel):
     token: str
     tags: list[str] = []
@@ -392,6 +398,24 @@ async def edit_token(
     return _json({"status": "success", "token": new_token, "pool": pool})
 
 
+@router.post("/tokens/oidc-convert")
+async def enqueue_oidc_convert(req: OidcConvertRequest):
+    """Re-enqueue tokens for paced SSO→OIDC conversion (background worker).
+
+    Already-fresh disk credentials are skipped inside the convert worker.
+    """
+    cleaned = list(dict.fromkeys(t for t in (_sanitize(x) for x in req.tokens) if t))
+    if not cleaned:
+        raise ValidationError("No valid tokens provided", param="tokens")
+    added = schedule_oidc_convert(cleaned)
+    return _json({
+        "status": "success",
+        "requested": len(cleaned),
+        "queued": added,
+        "queue_depth": _oidc_queue_depth(),
+    })
+
+
 @router.post("/tokens/disabled")
 async def toggle_token_disabled(
     req: ToggleTokenDisabledRequest,
@@ -626,34 +650,93 @@ def schedule_oidc_convert(tokens: list[str]) -> int:
     return added
 
 
-def _oidc_pace_config() -> tuple[int, float, float, float, int]:
-    """Read OIDC queue pacing from config (hot-reloadable between batches)."""
+def _oidc_pace_config() -> tuple[int, int, float, float, float, int]:
+    """Read OIDC queue pacing from config (hot-reloadable between batches).
+
+    Returns (workers, batch_size, item_delay, batch_delay, rate_backoff, max_retries).
+    """
     cfg = get_config()
-    batch_size = max(1, min(cfg.get_int("features.auto_oidc_batch_size", 3), 10))
-    item_delay = max(1.0, cfg.get_float("features.auto_oidc_item_delay_sec", 5.0))
-    batch_delay = max(0.0, cfg.get_float("features.auto_oidc_batch_delay_sec", 15.0))
-    rate_backoff = max(5.0, cfg.get_float("features.auto_oidc_rate_limit_backoff_sec", 35.0))
+    workers = max(1, min(cfg.get_int("features.auto_oidc_workers", 8), 16))
+    batch_size = max(1, min(cfg.get_int("features.auto_oidc_batch_size", workers), 32))
+    item_delay = max(0.0, cfg.get_float("features.auto_oidc_item_delay_sec", 0.0))
+    batch_delay = max(0.0, cfg.get_float("features.auto_oidc_batch_delay_sec", 2.0))
+    rate_backoff = max(5.0, cfg.get_float("features.auto_oidc_rate_limit_backoff_sec", 20.0))
     max_retries = max(0, min(cfg.get_int("features.auto_oidc_max_retries", 3), 8))
-    return batch_size, item_delay, batch_delay, rate_backoff, max_retries
+    return workers, batch_size, item_delay, batch_delay, rate_backoff, max_retries
+
+
+def _oidc_apply_result(
+    token: str,
+    status: str,
+    err: str | None,
+    *,
+    max_retries: int,
+) -> tuple[str, bool]:
+    """Update stats for one convert result.
+
+    Returns (bucket, requeued) where bucket is ok|skipped|failed|rate_limited.
+    """
+    if status == "ok":
+        _oidc_stats["ok"] += 1
+        _oidc_retry_count.pop(token, None)
+        return "ok", False
+    if status == "skipped":
+        _oidc_stats["skipped"] += 1
+        _oidc_retry_count.pop(token, None)
+        return "skipped", False
+    if status == "rate_limited":
+        _oidc_stats["rate_limited"] += 1
+        n = _oidc_retry_count.get(token, 0) + 1
+        _oidc_retry_count[token] = n
+        if n <= max_retries:
+            if token not in _oidc_pending_set:
+                _oidc_pending.append(token)
+                _oidc_pending_set.add(token)
+            logger.warning(
+                "admin oidc rate_limited, requeue: token={} attempt={}/{}",
+                _mask(token),
+                n,
+                max_retries,
+            )
+            return "rate_limited", True
+        _oidc_stats["failed"] += 1
+        _oidc_retry_count.pop(token, None)
+        logger.warning(
+            "admin oidc give up after rate limits: token={} error={}",
+            _mask(token),
+            (err or "")[:200],
+        )
+        return "failed", False
+
+    _oidc_stats["failed"] += 1
+    _oidc_retry_count.pop(token, None)
+    logger.warning(
+        "admin oidc convert failed: token={} error={}",
+        _mask(token),
+        (err or "")[:200],
+    )
+    return "failed", False
 
 
 async def _oidc_queue_worker() -> None:
-    """Drain pending OIDC conversions slowly in small batches.
+    """Drain pending OIDC conversions in concurrent batches.
 
     Config (features.*):
-      auto_oidc_batch_size              default 3
-      auto_oidc_item_delay_sec          default 5
-      auto_oidc_batch_delay_sec         default 15
-      auto_oidc_rate_limit_backoff_sec  default 35
+      auto_oidc_workers                 default 8
+      auto_oidc_batch_size              default 8
+      auto_oidc_item_delay_sec          default 0 (serial mode only)
+      auto_oidc_batch_delay_sec         default 2
+      auto_oidc_rate_limit_backoff_sec  default 20
       auto_oidc_max_retries             default 3
 
     Pacing is re-read each batch so admin config changes apply without restart.
     """
-    batch_size, item_delay, batch_delay, rate_backoff, max_retries = _oidc_pace_config()
+    workers, batch_size, item_delay, batch_delay, rate_backoff, max_retries = _oidc_pace_config()
 
     logger.info(
-        "admin oidc queue worker started: batch_size={} item_delay_s={} batch_delay_s={} "
-        "rate_backoff_s={} max_retries={} queue_depth={}",
+        "admin oidc queue worker started: workers={} batch_size={} item_delay_s={} "
+        "batch_delay_s={} rate_backoff_s={} max_retries={} queue_depth={}",
+        workers,
         batch_size,
         item_delay,
         batch_delay,
@@ -664,7 +747,9 @@ async def _oidc_queue_worker() -> None:
 
     while _oidc_pending:
         # Pick up hot-reloaded pacing between batches.
-        batch_size, item_delay, batch_delay, rate_backoff, max_retries = _oidc_pace_config()
+        workers, batch_size, item_delay, batch_delay, rate_backoff, max_retries = (
+            _oidc_pace_config()
+        )
 
         batch: list[str] = []
         while _oidc_pending and len(batch) < batch_size:
@@ -676,54 +761,54 @@ async def _oidc_queue_worker() -> None:
             break
 
         batch_ok = batch_skip = batch_fail = 0
-        for i, token in enumerate(batch):
-            status, err = await asyncio.to_thread(_oidc_convert_one, token)
-            if status == "ok":
-                batch_ok += 1
-                _oidc_stats["ok"] += 1
-                _oidc_retry_count.pop(token, None)
-            elif status == "skipped":
-                batch_skip += 1
-                _oidc_stats["skipped"] += 1
-                _oidc_retry_count.pop(token, None)
-            elif status == "rate_limited":
-                _oidc_stats["rate_limited"] += 1
-                n = _oidc_retry_count.get(token, 0) + 1
-                _oidc_retry_count[token] = n
-                if n <= max_retries:
-                    if token not in _oidc_pending_set:
-                        _oidc_pending.append(token)
-                        _oidc_pending_set.add(token)
-                    logger.warning(
-                        "admin oidc rate_limited, requeue: token={} attempt={}/{} backoff_s={}",
-                        _mask(token),
-                        n,
-                        max_retries,
-                        rate_backoff,
-                    )
-                    await asyncio.sleep(rate_backoff)
-                else:
-                    batch_fail += 1
-                    _oidc_stats["failed"] += 1
-                    _oidc_retry_count.pop(token, None)
-                    logger.warning(
-                        "admin oidc give up after rate limits: token={} error={}",
-                        _mask(token),
-                        (err or "")[:200],
-                    )
-            else:
-                batch_fail += 1
-                _oidc_stats["failed"] += 1
-                _oidc_retry_count.pop(token, None)
-                logger.warning(
-                    "admin oidc convert failed: token={} error={}",
-                    _mask(token),
-                    (err or "")[:200],
-                )
+        any_requeued = False
 
-            # Pace between items inside a batch (skip delay after last item).
-            if i + 1 < len(batch):
-                await asyncio.sleep(item_delay)
+        def _count(bucket: str) -> None:
+            nonlocal batch_ok, batch_skip, batch_fail
+            if bucket == "ok":
+                batch_ok += 1
+            elif bucket == "skipped":
+                batch_skip += 1
+            elif bucket == "failed":
+                batch_fail += 1
+            # rate_limited + requeued: not a terminal failure
+
+        if workers <= 1:
+            # Serial (legacy pacing).
+            for i, token in enumerate(batch):
+                status, err = await asyncio.to_thread(_oidc_convert_one, token)
+                bucket, requeued = _oidc_apply_result(
+                    token, status, err, max_retries=max_retries
+                )
+                _count(bucket)
+                if requeued:
+                    any_requeued = True
+                    await asyncio.sleep(rate_backoff)
+                if i + 1 < len(batch) and item_delay > 0:
+                    await asyncio.sleep(item_delay)
+        else:
+            # Concurrent batch — up to *workers* in flight.
+            sem = asyncio.Semaphore(workers)
+
+            async def _one(token: str) -> tuple[str, str, str | None]:
+                async with sem:
+                    status, err = await asyncio.to_thread(_oidc_convert_one, token)
+                    return token, status, err
+
+            results = await asyncio.gather(*[_one(t) for t in batch])
+            for token, status, err in results:
+                bucket, requeued = _oidc_apply_result(
+                    token, status, err, max_retries=max_retries
+                )
+                _count(bucket)
+                if requeued:
+                    any_requeued = True
+            if any_requeued:
+                logger.warning(
+                    "admin oidc batch hit rate limit, backoff_s={}",
+                    rate_backoff,
+                )
+                await asyncio.sleep(rate_backoff)
 
         logger.info(
             "admin oidc batch done: size={} ok={} skipped={} failed={} queue_depth={}",

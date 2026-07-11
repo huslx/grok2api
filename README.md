@@ -305,10 +305,11 @@ basic表示free账号，spuer和heavy 为付费
 >
 > **导入/注册后自动转换**：Admin 添加账号后，token 入队，由**后台单 worker 小批量分批**转换（不一次性打满 device flow）。配置项：
 > - `features.auto_oidc_on_import`（默认 `true`）
-> - `features.auto_oidc_batch_size`（默认 `3`）
-> - `features.auto_oidc_item_delay_sec`（默认 `5`）
-> - `features.auto_oidc_batch_delay_sec`（默认 `15`）
-> - `features.auto_oidc_rate_limit_backoff_sec`（默认 `35`）
+> - `features.auto_oidc_workers`（默认 `8`，批内并发）
+> - `features.auto_oidc_batch_size`（默认 `8`）
+> - `features.auto_oidc_item_delay_sec`（默认 `0`，仅串行模式）
+> - `features.auto_oidc_batch_delay_sec`（默认 `2`）
+> - `features.auto_oidc_rate_limit_backoff_sec`（默认 `20`）
 > - `features.auto_oidc_max_retries`（默认 `3`）| `grok-4.20-0309-console` | 默认 | basic |
 | `grok-4.20-0309-reasoning-console` | 固定 reasoning | basic |
 | `grok-4.20-0309-non-reasoning-console` | 无 reasoning | basic |
