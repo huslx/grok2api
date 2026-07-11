@@ -40,8 +40,12 @@ dynamic_statsig = true
 enable_nsfw = true
 # 账号导入/注册后是否自动 SSO→OIDC（cli-chat / grok-4.5，device flow）
 auto_oidc_on_import = true
-# 自动 OIDC 转换并发（1–4，过大易触发 rate_limited）
-auto_oidc_concurrency = 2
+# 后台队列：小批量分批转换，避免 device flow 限流
+auto_oidc_batch_size = 3                 # 每批处理个数
+auto_oidc_item_delay_sec = 8             # 批内账号间隔（秒）
+auto_oidc_batch_delay_sec = 25           # 批与批之间间隔（秒）
+auto_oidc_rate_limit_backoff_sec = 45    # 触发 rate_limited 后额外退避（秒）
+auto_oidc_max_retries = 3                # 限流/失败重入队最大次数
 # 搜索信源始终以 search_sources 结构化字段输出（无需此开关）。
 # 此选项仅控制是否同时在响应正文末尾追加 ## Sources 纯文本段落（兼容文本解析客户端）。
 show_search_sources = false
