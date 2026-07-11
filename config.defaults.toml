@@ -42,9 +42,9 @@ enable_nsfw = true
 auto_oidc_on_import = true
 # 后台队列：小批量分批转换，避免 device flow 限流
 auto_oidc_batch_size = 3                 # 每批处理个数
-auto_oidc_item_delay_sec = 8             # 批内账号间隔（秒）
-auto_oidc_batch_delay_sec = 25           # 批与批之间间隔（秒）
-auto_oidc_rate_limit_backoff_sec = 45    # 触发 rate_limited 后额外退避（秒）
+auto_oidc_item_delay_sec = 5             # 批内账号间隔（秒）
+auto_oidc_batch_delay_sec = 15           # 批与批之间间隔（秒）
+auto_oidc_rate_limit_backoff_sec = 35    # 触发 rate_limited 后额外退避（秒）
 auto_oidc_max_retries = 3                # 限流/失败重入队最大次数
 # 搜索信源始终以 search_sources 结构化字段输出（无需此开关）。
 # 此选项仅控制是否同时在响应正文末尾追加 ## Sources 纯文本段落（兼容文本解析客户端）。

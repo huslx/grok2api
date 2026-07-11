@@ -626,22 +626,30 @@ def schedule_oidc_convert(tokens: list[str]) -> int:
     return added
 
 
+def _oidc_pace_config() -> tuple[int, float, float, float, int]:
+    """Read OIDC queue pacing from config (hot-reloadable between batches)."""
+    cfg = get_config()
+    batch_size = max(1, min(cfg.get_int("features.auto_oidc_batch_size", 3), 10))
+    item_delay = max(1.0, cfg.get_float("features.auto_oidc_item_delay_sec", 5.0))
+    batch_delay = max(0.0, cfg.get_float("features.auto_oidc_batch_delay_sec", 15.0))
+    rate_backoff = max(5.0, cfg.get_float("features.auto_oidc_rate_limit_backoff_sec", 35.0))
+    max_retries = max(0, min(cfg.get_int("features.auto_oidc_max_retries", 3), 8))
+    return batch_size, item_delay, batch_delay, rate_backoff, max_retries
+
+
 async def _oidc_queue_worker() -> None:
     """Drain pending OIDC conversions slowly in small batches.
 
     Config (features.*):
       auto_oidc_batch_size              default 3
-      auto_oidc_item_delay_sec          default 8
-      auto_oidc_batch_delay_sec         default 25
-      auto_oidc_rate_limit_backoff_sec  default 45
+      auto_oidc_item_delay_sec          default 5
+      auto_oidc_batch_delay_sec         default 15
+      auto_oidc_rate_limit_backoff_sec  default 35
       auto_oidc_max_retries             default 3
+
+    Pacing is re-read each batch so admin config changes apply without restart.
     """
-    cfg = get_config()
-    batch_size = max(1, min(cfg.get_int("features.auto_oidc_batch_size", 3), 10))
-    item_delay = max(1.0, cfg.get_float("features.auto_oidc_item_delay_sec", 8.0))
-    batch_delay = max(0.0, cfg.get_float("features.auto_oidc_batch_delay_sec", 25.0))
-    rate_backoff = max(5.0, cfg.get_float("features.auto_oidc_rate_limit_backoff_sec", 45.0))
-    max_retries = max(0, min(cfg.get_int("features.auto_oidc_max_retries", 3), 8))
+    batch_size, item_delay, batch_delay, rate_backoff, max_retries = _oidc_pace_config()
 
     logger.info(
         "admin oidc queue worker started: batch_size={} item_delay_s={} batch_delay_s={} "
@@ -655,6 +663,9 @@ async def _oidc_queue_worker() -> None:
     )
 
     while _oidc_pending:
+        # Pick up hot-reloaded pacing between batches.
+        batch_size, item_delay, batch_delay, rate_backoff, max_retries = _oidc_pace_config()
+
         batch: list[str] = []
         while _oidc_pending and len(batch) < batch_size:
             tok = _oidc_pending.pop(0)
