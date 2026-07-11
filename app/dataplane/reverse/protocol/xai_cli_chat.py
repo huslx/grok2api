@@ -21,6 +21,13 @@ CLI_VERSION = "0.2.93"
 CLIENT_SURFACE = "grok-cli"
 CLIENT_IDENTIFIER = "grok2api"
 
+# Public API model name → cli-chat-proxy upstream model id.
+# Clients may use friendly aliases (e.g. grok-4.5-console); upstream only knows grok-4.5.
+CLI_MODELS: dict[str, str] = {
+    "grok-4.5": "grok-4.5",
+    "grok-4.5-console": "grok-4.5",
+}
+
 # Fields known to be rejected by cli-chat-proxy for current models.
 _UPSTREAM_UNSUPPORTED = frozenset(
     {
@@ -35,12 +42,27 @@ _UPSTREAM_UNSUPPORTED = frozenset(
 )
 
 
+def resolve_cli_model(model: str) -> str:
+    """Map public model name to cli-chat-proxy model id."""
+    name = (model or "").strip()
+    if not name:
+        return name
+    if name in CLI_MODELS:
+        return CLI_MODELS[name]
+    # Common alias pattern: strip trailing -console
+    if name.endswith("-console"):
+        base = name[: -len("-console")]
+        return CLI_MODELS.get(base, base)
+    return name
+
+
 def build_cli_headers(access_token: str, model: str) -> dict[str, str]:
+    upstream_model = resolve_cli_model(model)
     return {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {access_token}",
         "X-XAI-Token-Auth": "xai-grok-cli",
-        "x-grok-model-override": model,
+        "x-grok-model-override": upstream_model,
         "x-grok-client-version": CLI_VERSION,
         "x-grok-client-surface": CLIENT_SURFACE,
         "x-grok-client-identifier": CLIENT_IDENTIFIER,
@@ -74,8 +96,9 @@ def build_cli_payload(
     reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """Build OpenAI Chat Completions body for cli-chat-proxy."""
+    upstream_model = resolve_cli_model(model)
     body: dict[str, Any] = {
-        "model": model,
+        "model": upstream_model,
         "messages": messages,
         "stream": bool(stream),
     }
@@ -113,8 +136,9 @@ def build_cli_payload(
             body.pop(key, None)
 
     logger.debug(
-        "cli payload built: model={} messages={} tools={} stream={}",
+        "cli payload built: model={} upstream={} messages={} tools={} stream={}",
         model,
+        upstream_model,
         len(messages),
         len(cli_tools or []),
         body.get("stream"),
@@ -248,6 +272,7 @@ async def stream_cli_chat(
     from app.dataplane.proxy.adapters.session import ResettableSession, build_session_kwargs
     from app.dataplane.reverse.runtime.endpoint_table import CLI_CHAT
 
+    # payload.model is already resolved upstream id; override header uses it as-is.
     model = str(payload.get("model") or "")
     headers = build_cli_headers(access_token, model)
     payload_bytes = orjson.dumps(payload)
@@ -354,6 +379,8 @@ def _status_feedback(status: int):
 
 __all__ = [
     "CLI_VERSION",
+    "CLI_MODELS",
+    "resolve_cli_model",
     "build_cli_headers",
     "build_cli_payload",
     "CliStreamAdapter",
