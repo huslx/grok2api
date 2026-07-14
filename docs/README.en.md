@@ -2,9 +2,9 @@
 
 [![Python](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Version](https://img.shields.io/badge/version-2.0.4.rc4-111827)](../grok2api-main/grok2api-main/pyproject.toml)
+[![Version](https://img.shields.io/badge/version-2.0.4.rc4-111827)](../pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](../LICENSE)
-[![Docker](https://img.shields.io/badge/ghcr.io-jiujiu532%2Fgrok2api-2496ED?logo=docker&logoColor=white)](https://github.com/jiujiu532/grok2api/pkgs/container/grok2api)
+[![Docker](https://img.shields.io/badge/docker-local%20build-2496ED?logo=docker&logoColor=white)](../Dockerfile)
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-DC2626?logo=bookstack&logoColor=white)](../README.md)
 
 > [!NOTE]
@@ -27,28 +27,32 @@ Grok2API is a **FastAPI**-based Grok gateway that exposes Grok's web capabilitie
 
 ## Image Info
 
-This repository builds on top of [chenyme/grok2api](https://github.com/chenyme/grok2api) and ships a prebuilt Docker image:
+This repository builds on top of [chenyme/grok2api](https://github.com/chenyme/grok2api). **No public remote image is available; deploy with a local build.**
 
 | Field | Value |
 | :-- | :-- |
-| Image | `ghcr.io/jiujiu532/grok2api:latest` |
-| Architecture | `linux/amd64` |
+| Local image tag | `grok2api:local` (compose build output) |
+| Architecture | Host architecture (CI targets `linux/amd64`, `linux/arm64`) |
 | Base image | `python:3.13-alpine` |
 | Default port | `8000` |
 | Data dir | `/app/data` |
 | Logs dir | `/app/logs` |
 
+> `docker-compose.yml` uses `build: .` and `pull_policy: build`, so Compose will not pull from GHCR.
+
 <br>
 
 ## Quick Start
 
-### Option 1: Docker Compose (recommended)
+### Option 1: Docker Compose (recommended, local build)
 
 ```bash
-git clone https://github.com/jiujiu532/grok2api
-cd grok2api/grok2api-main/grok2api-main
+git clone https://github.com/huslx/grok2api
+cd grok2api
 cp .env.example .env
-docker compose up -d
+
+# Always build from the local Dockerfile
+docker compose up -d --build
 ```
 
 Tail logs:
@@ -57,11 +61,17 @@ Tail logs:
 docker compose logs -f grok2api
 ```
 
-> The included `docker-compose.yml` already pulls `ghcr.io/jiujiu532/grok2api:latest`. No local build is required.
-
-### Option 2: Plain Docker
+Anti-block stack (WARP + FlareSolverr):
 
 ```bash
+docker compose -f docker-compose.warp.yml up -d --build
+```
+
+### Option 2: Plain Docker (local build)
+
+```bash
+docker build -t grok2api:local .
+
 docker run -d \
   --name grok2api \
   -p 8000:8000 \
@@ -71,12 +81,14 @@ docker run -d \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/logs:/app/logs \
   --restart unless-stopped \
-  ghcr.io/jiujiu532/grok2api:latest
+  grok2api:local
 ```
 
 Windows PowerShell:
 
 ```powershell
+docker build -t grok2api:local .
+
 docker run -d `
   --name grok2api `
   -p 8000:8000 `
@@ -86,7 +98,7 @@ docker run -d `
   -v ${PWD}/data:/app/data `
   -v ${PWD}/logs:/app/logs `
   --restart unless-stopped `
-  ghcr.io/jiujiu532/grok2api:latest
+  grok2api:local
 ```
 
 ### Option 3: From source
@@ -94,8 +106,8 @@ docker run -d `
 Prerequisites: Python 3.13+ and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
-git clone https://github.com/jiujiu532/grok2api
-cd grok2api/grok2api-main/grok2api-main
+git clone https://github.com/huslx/grok2api
+cd grok2api
 cp .env.example .env
 uv sync
 uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
@@ -116,16 +128,15 @@ After the service is up, open `http://localhost:8000/admin/login`. Default passw
 ## Upgrade and Rollback
 
 ```bash
-# Upgrade to latest
-docker compose pull
-docker compose up -d
+# Pull code, rebuild locally, restart (./data and ./logs volumes are kept)
+git pull
+docker compose up -d --build
 
-# Pull a specific tag (see GHCR for available versions)
-docker pull ghcr.io/jiujiu532/grok2api:latest
-
-# Rollback
-docker run -d ... ghcr.io/jiujiu532/grok2api:<tag>
+# Anti-block stack: rebuild only the app service
+docker compose -f docker-compose.warp.yml up -d --build --no-deps grok2api
 ```
+
+Rollback: check out an older commit, then run `docker compose up -d --build` again.
 
 <br>
 
@@ -255,23 +266,25 @@ Runtime config can also be overridden via `GROK_`-prefixed env vars, e.g. `GROK_
 | `grok-4.20-0309-reasoning-heavy` | `expert` | `heavy` |
 | `grok-4.20-multi-agent-0309` | `heavy` | `heavy` |
 | `grok-4.20-fast` | `fast` | `basic`, prefers higher-tier accounts |
+| `grok-4.3-fast` | `fast` | `basic`, prefers higher-tier accounts |
 | `grok-4.20-auto` | `auto` | `super`, prefers higher-tier accounts |
 | `grok-4.20-expert` | `expert` | `super`, prefers higher-tier accounts |
 | `grok-4.20-heavy` | `heavy` | `heavy` |
 | `grok-4.3-beta` | `grok-420-computer-use-sa` | `super` |
 
-### Chat (console.x.ai free)
+### Chat (console.x.ai / CLI)
 
-| Model | reasoning effort | Notes |
-| :-- | :-- | :-- |
-| `grok-4-console` | default | Free account |
-| `grok-4.3-console` | medium | Free account |
-| `grok-4.3-low-console` | low | Free account |
-| `grok-4.3-medium-console` | medium | Free account |
-| `grok-4.3-high-console` | high | Free account |
-| `grok-4.20-0309-console` | default | Free account |
-| `grok-4.20-0309-reasoning-console` | fixed reasoning | Free account |
-| `grok-4.20-multi-agent-console` | default | Free account, multi-agent |
+| Model | Notes |
+| :-- | :-- |
+| `grok-4.3-console` | Console default |
+| `grok-4.3-low` / `medium` / `high` | Thinking effort variants |
+| `grok-4.5` / `grok-4.5-console` | CLI (OIDC) |
+| `grok-4.20-0309-console` | Console |
+| `grok-4.20-0309-non-reasoning-console` | Console non-reasoning |
+| `grok-4.20-0309-reasoning-console` | Console fixed reasoning |
+| `grok-4.20-multi-agent-console` | Console multi-agent |
+| `grok-4.20-multi-agent-low` / `medium` / `high` / `xhigh` | Multi-agent effort |
+| `grok-build-console` | Grok Build 0.1 |
 
 ### Image / Image Edit / Video
 

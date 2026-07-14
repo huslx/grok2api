@@ -43,7 +43,10 @@ services:
 
   # ── grok2api ──────────────────────────────────────────────────────────────
   grok2api:
-    image: ghcr.io/jiujiu532/grok2api:latest
+    # 当前无公开远程镜像，默认本地构建；勿改为 ghcr 以免 compose 尝试 pull 失败
+    image: grok2api:local
+    build: .
+    pull_policy: build
     container_name: grok2api
     restart: unless-stopped
     ports:

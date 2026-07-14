@@ -1,7 +1,10 @@
 services:
   grok2api:
     container_name: grok2api
-    image: ghcr.io/jiujiu532/grok2api:latest
+    # 当前无公开远程镜像，默认本地构建；勿改为 ghcr 以免 compose 尝试 pull 失败
+    image: grok2api:local
+    build: .
+    pull_policy: build
     ports:
       - "${HOST_PORT:-8000}:${SERVER_PORT:-8000}"
     environment:
