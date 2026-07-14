@@ -10,7 +10,6 @@ window.renderWebuiHeader = async function renderWebuiHeader() {
       return 'v1';
     }
   })();
-  const HEADER_HTML_CACHE_KEY = `grok2api.webui_header_html.${scriptVersion}`;
   const META_VERSION_CACHE_KEY = `grok2api.meta_version.${scriptVersion}`;
   let appVersion = '';
 
@@ -139,17 +138,9 @@ window.renderWebuiHeader = async function renderWebuiHeader() {
   await loadVersion();
 
   try {
-    const cachedHtml = window.__grok2apiWebuiHeaderHtml || readSessionCache(HEADER_HTML_CACHE_KEY);
-    if (cachedHtml) {
-      mount.innerHTML = cachedHtml;
-    } else {
-      const res = await fetch('/static/webui/header.html');
-      if (!res.ok) throw new Error('header unavailable');
-      const html = await res.text();
-      mount.innerHTML = html;
-      window.__grok2apiWebuiHeaderHtml = html;
-      writeSessionCache(HEADER_HTML_CACHE_KEY, html);
-    }
+    const res = await fetch('/static/webui/header.html', { cache: 'no-store' });
+    if (!res.ok) throw new Error('header unavailable');
+    mount.innerHTML = await res.text();
   } catch {
     mount.innerHTML = `
       <header class="admin-header webui-header-bar">
