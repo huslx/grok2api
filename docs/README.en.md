@@ -12,7 +12,7 @@
 
 <br>
 
-Grok2API is a **FastAPI**-based Grok gateway that exposes Grok's web capabilities through OpenAI-compatible APIs. Highlights:
+**Grok2API** is a **FastAPI**-based Grok gateway that exposes Grok web capabilities through OpenAI / Anthropic-compatible APIs. Highlights:
 
 - OpenAI-compatible endpoints: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/images/generations`, `/v1/images/edits`, `/v1/videos`, `/v1/videos/{video_id}`, `/v1/videos/{video_id}/content`
 - Anthropic-compatible endpoint: `/v1/messages`
@@ -21,7 +21,29 @@ Grok2API is a **FastAPI**-based Grok gateway that exposes Grok's web capabilitie
 - Local image / video caching with reverse-proxied URLs
 - Text-to-image, image edit, text-to-video, image-to-video
 - Built-in Admin console, Web Chat, Masonry image gallery, ChatKit voice page
-- `console.x.ai` free account support with a dedicated `*-console` model family
+- `console.x.ai` free account support plus `*-console` / CLI models (e.g. `grok-4.5`)
+
+<br>
+
+## Table of Contents
+
+- [Image Info](#image-info)
+- [Quick Start](#quick-start)
+- [Upgrade and Rollback](#upgrade-and-rollback)
+- [Reverse Proxy (Nginx example)](#reverse-proxy-nginx-example)
+- [WebUI](#webui)
+- [Account Management](#account-management)
+- [Runtime Configuration](#runtime-configuration)
+- [Environment Variables](#environment-variables)
+- [Models](#models)
+- [API Reference](#api-reference)
+- [Examples](#examples)
+- [Anti-block Stack (WARP + FlareSolverr)](#anti-block-stack-warp--flaresolverr)
+- [Utility Scripts](#utility-scripts)
+- [FAQ](#faq)
+- [Project Layout](#project-layout)
+- [Credits](#credits)
+- [License](#license)
 
 <br>
 
@@ -61,7 +83,7 @@ Tail logs:
 docker compose logs -f grok2api
 ```
 
-Anti-block stack (WARP + FlareSolverr):
+Anti-block stack (WARP + FlareSolverr — see [Anti-block Stack](#anti-block-stack-warp--flaresolverr)):
 
 ```bash
 docker compose -f docker-compose.warp.yml up -d --build
@@ -119,9 +141,11 @@ After the service is up, open `http://localhost:8000/admin/login`. Default passw
 
 1. Change `app.app_key` (Admin console password)
 2. Set `app.api_key` (API auth key; leave empty to disable auth)
-3. Set `app.app_url` (publicly reachable base URL; otherwise image / video links return 403)
+3. Set `app.app_url` (publicly reachable base URL; otherwise image / video links may return 403)
+4. Import accounts under **Account management** (see [Account Management](#account-management))
 
-> Runtime config is persisted to `${DATA_DIR}/config.toml` and applied immediately. No container restart is required.
+> Runtime config is persisted to `${DATA_DIR}/config.toml` and applied immediately. No container restart is required.  
+> Defaults ship in `config.defaults.toml` at the repo root.
 
 <br>
 
@@ -195,29 +219,136 @@ After enabling the reverse proxy, set `app.app_url` to `https://your.domain.com`
 
 ### Account types
 
-| Type | Description | Models |
-| :-- | :-- | :-- |
-| **Paid account** | Official x.ai paid account | All `grok-4.20-*`, `grok-4.3-beta` |
-| **Free account** | Free account via `console.x.ai` | All `*-console` models |
+| Type | Credential | Typical models | Notes |
+| :-- | :-- | :-- | :-- |
+| **Paid** | `sso` cookie from grok.com / x.ai | `grok-4.20-*`, `grok-4.3-beta`, Imagine, etc. | Official web / paid quota |
+| **Free Console** | `sso` + optional CF Clearance | `*-console`, `grok-4.3-{low,medium,high}` | Routed via `console.x.ai` |
+| **CLI (grok-4.5)** | Same `sso`, OIDC at runtime | `grok-4.5`, `grok-4.5-console` | Requires SSO→OIDC (can be automatic) |
 
-### Free account setup
+Admin path: **Admin → Account**. Batch paste accepts an optional `sso=` prefix.
 
-To use free accounts you need both an SSO Token and a CF Clearance:
+### Paid account setup
+
+1. Sign in to an x.ai / grok.com account with the required plan
+2. Open DevTools (F12) → Network and copy the **`sso`** cookie value
+3. Paste it under **Account → Add**
+4. If your egress IP is frequently challenged by Cloudflare, configure [Proxy & Clearance](#proxy--clearance)
+
+> Paid models depend on account tier (basic / super / heavy). Missing quota or tier causes failures or account rotation.
+
+### Free Console account setup
 
 1. Open browser DevTools (F12)
 2. Visit `https://console.x.ai/`
-3. In the Network tab, inspect any request's cookies and copy:
-   - the `sso` value
-   - the `cf_clearance` value
-4. In Admin → Account → Add account, paste both values into the matching fields
+3. In the Network tab, copy from cookies:
+   - `sso`
+   - `cf_clearance` (if present)
+4. Add the SSO in Admin → Account; CF cookies are usually managed under **Config → Proxy / Clearance** (`manual` or `flaresolverr`)
 
-> SSO Token and CF Clearance are sensitive credentials. Never commit them to source control.
+### CLI / grok-4.5 (OIDC)
+
+`grok-4.5` uses the CLI path and needs an OIDC `access_token` obtained from SSO via Device Flow.
+
+Defaults from `config.defaults.toml`:
+
+| Key | Default | Meaning |
+| :-- | :-- | :-- |
+| `features.auto_oidc_on_import` | `true` | Queue SSO→OIDC after import / registration |
+| `features.auto_oidc_workers` | `8` | Batch convert concurrency |
+| `chat.cli_reasoning_effort` | `medium` | Default CLI effort (overridable per request) |
+| `chat.cli_account_retries` | `8` | Min account switches when OIDC is not warm |
+
+Manual conversion options:
+
+- **Admin**: OIDC convert action on the account page (`POST /admin/api/tokens/oidc-convert`)
+- **CLI** (see [Utility Scripts](#utility-scripts)):
+
+```bash
+uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
+```
+
+Runtime OIDC cache defaults to `${DATA_DIR}/oidc_auth.json`.
+
+> SSO, CF Clearance, and OIDC tokens are secrets. Never commit them.
+
+<br>
+
+## Runtime Configuration
+
+Runtime file: `${DATA_DIR}/config.toml` (default `./data/config.toml`).  
+First boot seeds from `config.defaults.toml`. You can also edit via **Admin → Config** (applies immediately).
+
+Env overrides use `GROK_<SECTION>_<KEY>` (uppercase), for example:
+
+- `GROK_APP_API_KEY` → `app.api_key`
+- `GROK_FEATURES_STREAM` → `features.stream`
+
+Deeply nested keys are easier to edit in `config.toml` or the Admin UI.
+
+### Access control `[app]`
+
+| Key | Default | Description |
+| :-- | :-- | :-- |
+| `app_key` | `grok2api` | Admin password |
+| `api_key` | `""` | API Bearer; empty disables `/v1/*` auth |
+| `app_url` | `""` | Public base URL (required for local media proxy links) |
+| `webui_enabled` | `false` | Enable WebUI |
+| `webui_key` | `""` | WebUI password; empty skips extra check |
+
+### Feature flags `[features]`
+
+| Key | Default | Description |
+| :-- | :-- | :-- |
+| `stream` | `true` | Default streaming when request omits `stream` |
+| `thinking` | `true` | Emit reasoning / thinking |
+| `thinking_summary` | `false` | Summarized reasoning instead of raw |
+| `memory` | `false` | Conversation memory |
+| `temporary` | `true` | Temporary chats |
+| `auto_chat_mode_fallback` | `true` | Fall back from AUTO when quota is exhausted |
+| `image_format` | `grok_url` | `grok_url` / `local_url` / `grok_md` / `local_md` / `base64` |
+| `video_format` | `grok_url` | `grok_url` / `local_url` / `grok_html` / `local_html` |
+| `enable_nsfw` | `true` | Allow NSFW image-related features |
+| `auto_oidc_on_import` | `true` | Auto SSO→OIDC after import |
+| `show_search_sources` | `false` | Append `## Sources` text to the body |
+
+### Proxy & Clearance
+
+`[proxy.egress]`:
+
+| Key | Default | Description |
+| :-- | :-- | :-- |
+| `mode` | `direct` | `direct` / `single_proxy` / `proxy_pool` |
+| `proxy_url` | `""` | Single proxy for API traffic |
+| `proxy_pool` | `[]` | Proxy pool |
+| `resource_proxy_url` | `""` | Media download proxy; falls back to `proxy_url` |
+| `skip_ssl_verify` | `false` | Skip SSL verify for proxy TLS |
+
+`[proxy.clearance]`:
+
+| Key | Default | Description |
+| :-- | :-- | :-- |
+| `mode` | `none` | `none` / `manual` / `flaresolverr` |
+| `cf_cookies` | `""` | manual: full cookie string |
+| `user_agent` | Chrome 136 UA | Must match cookies |
+| `flaresolverr_url` | `""` | FlareSolverr base URL |
+| `refresh_interval` | `3600` | Clearance refresh interval (seconds) |
+
+### Retry & account scheduling
+
+| Key | Default | Description |
+| :-- | :-- | :-- |
+| `retry.max_retries` | `1` | Max account switches (0 = no retry) |
+| `retry.on_codes` | `429,401,503` | Status codes that trigger rotation |
+| `account.refresh.enabled` | `true` | `true` = quota-aware scoring; `false` = random pick |
+| `account.selection.max_inflight` | `8` | Per-account concurrency cap |
+
+Full defaults: [`config.defaults.toml`](../config.defaults.toml).
 
 <br>
 
 ## Environment Variables
 
-Bootstrap-time variables (`.env` / Compose / `docker run -e`):
+Bootstrap-time variables (`.env` / Compose / `docker run -e`). Template: [`.env.example`](../.env.example).
 
 | Name | Description | Default |
 | :-- | :-- | :-- |
@@ -243,13 +374,11 @@ Bootstrap-time variables (`.env` / Compose / `docker run -e`):
 | `ACCOUNT_SQL_POOL_RECYCLE` | Connection recycle time (s) | `1800` |
 | `CONFIG_LOCAL_PATH` | Runtime config file path | `${DATA_DIR}/config.toml` |
 
-Runtime config can also be overridden via `GROK_`-prefixed env vars, e.g. `GROK_APP_API_KEY` overrides `app.api_key`, `GROK_FEATURES_STREAM` overrides `features.stream`.
-
 <br>
 
 ## Models
 
-> Use `GET /v1/models` to fetch the live list.
+> Use `GET /v1/models` for the live list.
 
 ### Chat (paid)
 
@@ -314,10 +443,25 @@ Runtime config can also be overridden via `GROK_`-prefixed env vars, e.g. `GROK_
 | `GET /v1/videos/{video_id}/content` | yes | Download the final video |
 | `GET /v1/files/video?id=...` | no | Locally cached video |
 | `GET /v1/files/image?id=...` | no | Locally cached image |
+| `GET /health` | no | Health check |
+
+Common `POST /v1/chat/completions` fields:
+
+| Field | Description |
+| :-- | :-- |
+| `model` | Model name |
+| `messages` | OpenAI-style messages |
+| `stream` | Streaming; falls back to `features.stream` when omitted |
+| `reasoning_effort` | Effort (e.g. `low` / `medium` / `high`; used by CLI) |
+| `tools` / `tool_choice` | Function tools passthrough |
+| `image_config` | `n` / `size` / `response_format` for image models |
+| `video_config` | `seconds` / `size` / `resolution_name` / `preset` for video models |
 
 <br>
 
 ## Examples
+
+Set `$GROK2API_API_KEY` to your `app.api_key` (omit the header if empty).
 
 ### Paid account chat
 
@@ -335,18 +479,93 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-### Free account chat
+### Free Console chat
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.3-high-console",
+    "model": "grok-4.3-high",
     "stream": true,
     "messages": [
       {"role":"user","content":"Hello"}
     ]
+  }'
+```
+
+### CLI / grok-4.5
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GROK2API_API_KEY" \
+  -d '{
+    "model": "grok-4.5",
+    "stream": true,
+    "reasoning_effort": "medium",
+    "messages": [
+      {"role":"user","content":"Explain what an API gateway is in three sentences"}
+    ]
+  }'
+```
+
+### Function tools
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GROK2API_API_KEY" \
+  -d '{
+    "model": "grok-4.20-auto",
+    "messages": [
+      {"role":"user","content":"What is the weather in Beijing?"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {"type": "string"}
+            },
+            "required": ["city"]
+          }
+        }
+      }
+    ]
+  }'
+```
+
+### Anthropic Messages
+
+```bash
+curl http://localhost:8000/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $GROK2API_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "grok-4.3-high",
+    "max_tokens": 1024,
+    "messages": [
+      {"role":"user","content":"Hello"}
+    ]
+  }'
+```
+
+### OpenAI Responses
+
+```bash
+curl http://localhost:8000/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GROK2API_API_KEY" \
+  -d '{
+    "model": "grok-4.20-auto",
+    "input": "Introduce yourself in one sentence",
+    "stream": false
   }'
 ```
 
@@ -365,6 +584,24 @@ curl http://localhost:8000/v1/images/generations \
   }'
 ```
 
+### Image edit
+
+```bash
+curl http://localhost:8000/v1/images/edits \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GROK2API_API_KEY" \
+  -d '{
+    "model": "grok-imagine-image-edit",
+    "prompt": "Change the background to a cyberpunk city at night",
+    "image": "https://example.com/cat.png",
+    "n": 1,
+    "size": "1024x1024",
+    "response_format": "url"
+  }'
+```
+
+`image` also accepts data URLs or multipart uploads.
+
 ### Video generation
 
 ```bash
@@ -378,23 +615,124 @@ curl http://localhost:8000/v1/videos \
   -F "preset=normal"
 ```
 
-For full field references see the upstream [API docs](https://github.com/chenyme/grok2api#api-%E4%B8%80%E8%A7%88).
+Poll the job:
+
+```bash
+curl http://localhost:8000/v1/videos/$VIDEO_ID \
+  -H "Authorization: Bearer $GROK2API_API_KEY"
+```
+
+For additional upstream field notes see [chenyme/grok2api](https://github.com/chenyme/grok2api); this fork’s source of truth is the local implementation and `GET /v1/models`.
+
+<br>
+
+## Anti-block Stack (WARP + FlareSolverr)
+
+When egress IPs are unclean or Cloudflare challenges are frequent:
+
+```bash
+docker compose -f docker-compose.warp.yml up -d --build
+```
+
+| Service | Role |
+| :-- | :-- |
+| `init-config` | Seeds `data/config.toml`: egress via Privoxy, clearance via FlareSolverr |
+| `warp-proxy` | Cloudflare WARP egress |
+| `privoxy` | HTTP proxy in front of WARP (`127.0.0.1:40080` on the host) |
+| `flaresolverr` | Auto-solves CF challenges for `proxy.clearance.mode=flaresolverr` |
+| `grok2api` | Main app |
+
+Effective config written by init:
+
+```toml
+[proxy.egress]
+mode = "single_proxy"
+proxy_url = "http://privoxy:8118"
+resource_proxy_url = "http://privoxy:8118"
+
+[proxy.clearance]
+mode = "flaresolverr"
+flaresolverr_url = "http://flaresolverr:8191"
+```
+
+If `data/config.toml` already exists without `privoxy`, `init-config` rewrites the proxy sections; if `privoxy` is already present, it skips.
+
+The main `docker-compose.yml` also contains optional commented WARP / FlareSolverr blocks for partial setups.
+
+<br>
+
+## Utility Scripts
+
+Run from the repo root after `uv sync`:
+
+| Script | Purpose |
+| :-- | :-- |
+| `scripts/sso_to_oidc.py` | SSO → OIDC (Device Flow) into `data/oidc_auth.json` |
+| `scripts/oidc_to_auth_array.py` | `oidc_auth.json` → grok CLI-style auth array |
+| `scripts/oidc_to_sub2api.py` | `oidc_auth.json` → Sub2API import JSON |
+| `scripts/init_proxy_config.py` | Writes proxy config for the anti-block compose stack |
+
+Examples:
+
+```bash
+uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
+uv run python scripts/sso_to_oidc.py --sso-file ./sso.txt --workers 4
+uv run python scripts/oidc_to_auth_array.py
+```
 
 <br>
 
 ## FAQ
 
-**Q: `/admin/login` is unreachable after the container starts.**
+**Q: `/admin/login` is unreachable after the container starts.**  
 Check the port mapping with `docker compose ps` (expect `0.0.0.0:8000->8000/tcp`) and verify your host firewall allows it.
 
-**Q: Image / video URLs return 403.**
-`app.app_url` is missing or wrong. It must be a fully qualified URL that clients can reach (e.g. `https://api.example.com`).
+**Q: Image / video URLs return 403.**  
+`app.app_url` is missing or wrong. It must be a fully qualified URL that clients can reach (e.g. `https://api.example.com`). For local proxy formats, also check `features.image_format` / `video_format` and the cache directory.
 
-**Q: Cloudflare keeps blocking requests.**
-In Admin → Config → Proxy, switch `proxy.clearance.mode` to `manual` and provide matching `cf_cookies` + `user_agent`, or deploy FlareSolverr and switch to the `flaresolverr` mode.
+**Q: Cloudflare keeps blocking requests.**  
+In Admin → Config → Proxy, switch `proxy.clearance.mode` to `manual` with matching `cf_cookies` + `user_agent`, or deploy FlareSolverr and use `flaresolverr` mode. Or start the [anti-block stack](#anti-block-stack-warp--flaresolverr).
 
-**Q: Multi-worker deployment.**
+**Q: `grok-4.5` fails with OIDC / auth errors.**  
+Ensure SSO→OIDC completed (auto on import, Admin batch convert, or `scripts/sso_to_oidc.py`). Check `data/oidc_auth.json`. On rate limits, lower `features.auto_oidc_workers` and raise `auto_oidc_batch_delay_sec`.
+
+**Q: Multi-worker deployment.**  
 When `SERVER_WORKERS > 1`, the account refresh scheduler elects a single leader via a file lock; other workers only run lightweight syncing. On Windows, single-worker mode is recommended.
+
+**Q: Which account storage backend should I use?**  
+Single-node: `local` (SQLite). Shared pools across instances: `redis` / `mysql` / `postgresql` with the matching DSN.
+
+**Q: How do I health-check the service?**  
+
+```bash
+curl http://localhost:8000/health
+```
+
+<br>
+
+## Project Layout
+
+```text
+app/
+  control/      # Account / model / proxy control plane
+  dataplane/    # Selection, reverse proxy, transport, protocols
+  platform/     # Config, auth, logging, storage
+  products/     # OpenAI / Anthropic / Web product entrypoints
+  statics/      # Admin + WebUI static assets
+config.defaults.toml    # Runtime config defaults
+docker-compose.yml      # Standard deploy
+docker-compose.warp.yml # Anti-block stack
+scripts/                # OIDC / proxy helpers
+tests/                  # Unit and regression tests
+```
+
+Development helpers:
+
+```bash
+uv sync --group dev
+uv run ruff check .
+uv run pytest
+```
 
 <br>
 
@@ -408,4 +746,4 @@ When `SERVER_WORKERS > 1`, the account refresh scheduler elects a single leader 
 
 ## License
 
-MIT
+[MIT](../LICENSE)
