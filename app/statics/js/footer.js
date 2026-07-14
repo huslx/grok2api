@@ -29,7 +29,7 @@ window.renderSiteFooter = async function renderSiteFooter() {
     return node;
   };
 
-  const brand = link('Grok2API', 'https://github.com/jiujiu532/grok2api');
+  const brand = link('Grok2API', 'https://github.com/huslx/grok2api');
   footer.appendChild(brand);
 
   footer.appendChild(sep());
@@ -39,7 +39,7 @@ window.renderSiteFooter = async function renderSiteFooter() {
 
   footer.appendChild(sep());
 
-  const author2 = link('@jiu', 'https://github.com/jiujiu532');
+  const author2 = link('@xingjuan', 'https://github.com/huslx');
   footer.appendChild(author2);
 
   document.body.appendChild(footer);
