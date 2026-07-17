@@ -352,7 +352,12 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
 
 
 async def _safe_sse_responses(stream) -> AsyncGenerator[str, None]:
-    """SSE wrapper that converts errors to Responses API error events."""
+    """SSE wrapper that converts errors to Responses API terminal events.
+
+    Codex (wire_api=responses) requires a terminal ``response.completed`` /
+    ``response.failed`` before the stream ends; a bare ``error`` event alone
+    surfaces as ``stream closed before response.completed``.
+    """
     try:
         async for chunk in stream:
             yield chunk
@@ -368,8 +373,25 @@ async def _safe_sse_responses(stream) -> AsyncGenerator[str, None]:
                 "code": None,
                 "param": None,
             }
+        # Standard error event (some clients read this)
         payload = orjson.dumps({"type": "error", **err}).decode()
         yield f"event: error\ndata: {payload}\n\n"
+        # Terminal failed response so Codex does not treat the stream as truncated
+        failed = orjson.dumps({
+            "type": "response.failed",
+            "response": {
+                "id": "resp_error",
+                "object": "response",
+                "status": "failed",
+                "error": {
+                    "message": err.get("message") or str(exc),
+                    "type": err.get("type") or "server_error",
+                    "code": err.get("code"),
+                },
+                "output": [],
+            },
+        }).decode()
+        yield f"event: response.failed\ndata: {failed}\n\n"
         yield "data: [DONE]\n\n"
 
 

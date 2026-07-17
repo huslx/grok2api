@@ -71,16 +71,125 @@ def build_cli_headers(access_token: str, model: str) -> dict[str, str]:
     }
 
 
+# cli-chat-proxy only accepts these tool.type values (others → HTTP 422).
+_CLI_TOOL_TYPES = frozenset({"function", "live_search"})
+
+
+def _flatten_message_content(content: Any) -> Any:
+    """Collapse OpenAI multi-part content lists into a plain string when possible.
+
+    Codex / Responses clients often send content as
+    ``[{"type":"text","text":"..."}]`` or ``input_text`` parts. cli-chat-proxy
+    is happier with plain strings for text-only turns.
+    """
+    if not isinstance(content, list):
+        return content
+    texts: list[str] = []
+    only_text = True
+    for part in content:
+        if not isinstance(part, dict):
+            only_text = False
+            break
+        ptype = str(part.get("type") or "")
+        if ptype in ("text", "input_text", "output_text"):
+            texts.append(str(part.get("text") or ""))
+        else:
+            only_text = False
+            break
+    if only_text:
+        return "".join(texts)
+    return content
+
+
+def _normalize_cli_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize chat messages for cli-chat-proxy."""
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        m = dict(msg)
+        role = str(m.get("role") or "user")
+        # Responses API "developer" → system for chat-completions upstream.
+        if role == "developer":
+            m["role"] = "system"
+            role = "system"
+        if "content" in m:
+            m["content"] = _flatten_message_content(m.get("content"))
+        # Drop empty system/developer noise.
+        if role in ("system", "user", "assistant") and m.get("content") == "":
+            if role == "system":
+                continue
+        out.append(m)
+    return out
+
+
 def _to_cli_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Keep only tool types cli-chat-proxy accepts; normalize Responses flat tools.
+
+    Codex ships built-ins (web_search, local_shell, computer_use, …) that the
+    Grok CLI proxy rejects with 422 ``unknown variant``. Strip them so function
+    tools still work.
+    """
     if not tools:
         return None
     out: list[dict[str, Any]] = []
+    dropped: list[str] = []
     for tool in tools:
         if not isinstance(tool, dict):
             continue
-        # Pass through OpenAI function tools and built-in types as-is.
+        ttype = str(tool.get("type") or "function")
+        # Responses API flat function tools: {type, name, description, parameters}
+        if ttype == "function" and "function" not in tool and "name" in tool:
+            fn: dict[str, Any] = {
+                "name": tool.get("name", ""),
+                "description": tool.get("description") or "",
+            }
+            if tool.get("parameters") is not None:
+                fn["parameters"] = tool["parameters"]
+            elif tool.get("parameters") is None:
+                fn["parameters"] = {"type": "object", "properties": {}}
+            # strict is optional; keep if present
+            if "strict" in tool:
+                fn["strict"] = tool["strict"]
+            out.append({"type": "function", "function": fn})
+            continue
+        if ttype not in _CLI_TOOL_TYPES:
+            dropped.append(ttype)
+            continue
+        # Nested function tools — ensure parameters default
+        if ttype == "function":
+            nested = tool.get("function") if isinstance(tool.get("function"), dict) else None
+            if nested is not None:
+                fn = dict(nested)
+                if fn.get("parameters") is None:
+                    fn["parameters"] = {"type": "object", "properties": {}}
+                cleaned = dict(tool)
+                cleaned["function"] = fn
+                out.append(cleaned)
+                continue
         out.append(tool)
+    if dropped:
+        # De-dupe while preserving order for the log line
+        seen: set[str] = set()
+        uniq = [t for t in dropped if not (t in seen or seen.add(t))]  # type: ignore[func-returns-value]
+        logger.info(
+            "cli tools filtered: dropped_types={} kept={}",
+            uniq,
+            len(out),
+        )
     return out or None
+
+
+def _normalize_tool_choice(tool_choice: Any, tools: list[dict[str, Any]] | None) -> Any:
+    """Map Responses-style tool_choice to chat-completions form when needed."""
+    if tool_choice is None or not tools:
+        return tool_choice
+    if not isinstance(tool_choice, dict):
+        return tool_choice
+    # Responses: {"type":"function","name":"foo"} → chat {"type":"function","function":{"name":"foo"}}
+    if tool_choice.get("type") == "function" and "name" in tool_choice and "function" not in tool_choice:
+        return {"type": "function", "function": {"name": tool_choice["name"]}}
+    return tool_choice
 
 
 def build_cli_payload(
@@ -97,9 +206,10 @@ def build_cli_payload(
 ) -> dict[str, Any]:
     """Build OpenAI Chat Completions body for cli-chat-proxy."""
     upstream_model = resolve_cli_model(model)
+    norm_messages = _normalize_cli_messages(messages)
     body: dict[str, Any] = {
         "model": upstream_model,
-        "messages": messages,
+        "messages": norm_messages,
         "stream": bool(stream),
     }
     if temperature is not None:
@@ -125,8 +235,9 @@ def build_cli_payload(
     cli_tools = _to_cli_tools(tools)
     if cli_tools:
         body["tools"] = cli_tools
-        if tool_choice is not None:
-            body["tool_choice"] = tool_choice
+        choice = _normalize_tool_choice(tool_choice, cli_tools)
+        if choice is not None:
+            body["tool_choice"] = choice
 
     if body.get("stream"):
         body["stream_options"] = {"include_usage": True}
@@ -139,7 +250,7 @@ def build_cli_payload(
         "cli payload built: model={} upstream={} messages={} tools={} stream={}",
         model,
         upstream_model,
-        len(messages),
+        len(norm_messages),
         len(cli_tools or []),
         body.get("stream"),
     )

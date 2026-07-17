@@ -228,6 +228,48 @@ async def create(
         messages.append({"role": "system", "content": instructions})
     messages.extend(_parse_input(input_val))
 
+    response_id  = make_resp_id("resp")
+    reasoning_id = make_resp_id("rs")
+    message_id   = make_resp_id("msg")
+
+    # -------------------------------------------------------------------------
+    # CLI 模型路由 — cli-chat-proxy.grok.com（OIDC）；Codex wire_api=responses 走这里
+    # -------------------------------------------------------------------------
+    if spec.is_cli_chat():
+        from .cli_responses import create as cli_responses_create
+        return await cli_responses_create(
+            model=model,
+            messages=messages,
+            stream=stream,
+            emit_think=emit_think,
+            temperature=temperature,
+            top_p=top_p,
+            response_id=response_id,
+            reasoning_id=reasoning_id,
+            message_id=message_id,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
+    # -------------------------------------------------------------------------
+    # Console 模型路由 — 走 console.x.ai/v1/responses，输出转为 Responses API 格式
+    # -------------------------------------------------------------------------
+    if spec.is_console_chat():
+        from .console_responses import create as console_responses_create
+        return await console_responses_create(
+            model=model,
+            messages=messages,
+            stream=stream,
+            emit_think=emit_think,
+            temperature=temperature,
+            top_p=top_p,
+            response_id=response_id,
+            reasoning_id=reasoning_id,
+            message_id=message_id,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
     message, files = _extract_message(messages)
     if not message.strip():
         raise UpstreamError("Empty message after extraction", status=400)
@@ -249,29 +291,7 @@ async def create(
 
     max_retries  = selection_max_retries()
     retry_codes  = _configured_retry_codes(cfg)
-    response_id  = make_resp_id("resp")
-    reasoning_id = make_resp_id("rs")
-    message_id   = make_resp_id("msg")
     timeout_s    = cfg.get_float("chat.timeout", 120.0)
-
-    # -------------------------------------------------------------------------
-    # Console 模型路由 — 走 console.x.ai/v1/responses，输出转为 Responses API 格式
-    # -------------------------------------------------------------------------
-    if spec.is_console_chat():
-        from .console_responses import create as console_responses_create
-        return await console_responses_create(
-            model=model,
-            messages=messages,
-            stream=stream,
-            emit_think=emit_think,
-            temperature=temperature,
-            top_p=top_p,
-            response_id=response_id,
-            reasoning_id=reasoning_id,
-            message_id=message_id,
-            tools=tools,
-            tool_choice=tool_choice,
-        )
 
     # -------------------------------------------------------------------------
     # Streaming (grok.com path)
