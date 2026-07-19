@@ -392,15 +392,30 @@
       if (isVideoUrl(url)) return `[video](${url})`;
       return full;
     });
-    // Bare media URLs on their own line (or mid-paragraph after whitespace)
+    // Bare media URLs — also after CJK punctuation (：、。等) which [\s(] misses
     input = input.replace(
-      /(^|[\s(])((?:https?:\/\/|\/)[^\s<>\[\]()'"]+)/g,
+      /(^|[\s(：:、，,。；;！!？?（【「])((?:https?:\/\/|\/)[^\s<>\[\]()'"]+)/g,
       (full, prefix, url) => {
-        const cleaned = url.replace(/[.,;:!?)]+$/, '');
+        const cleaned = url.replace(/[.,;:!?)。）」】]+$/u, '');
         const trailing = url.slice(cleaned.length);
         if (isImageUrl(cleaned)) return `${prefix}![image](${cleaned})${trailing}`;
         if (isVideoUrl(cleaned)) return `${prefix}[video](${cleaned})${trailing}`;
         return full;
+      }
+    );
+    // Absolute fallback: any leftover /v1/files/video?... becomes [video](...)
+    input = input.replace(
+      /(?<!\]\()((?:https?:\/\/[^\s)\]>'"]+)?\/v1\/files\/video\?[^\s)\]>'"]+)/gi,
+      (url) => {
+        const cleaned = url.replace(/[.,;:!?)。）」】]+$/u, '');
+        return `[video](${cleaned})`;
+      }
+    );
+    input = input.replace(
+      /(?<!\]\()((?:https?:\/\/[^\s)\]>'"]+)?\/v1\/files\/image\?[^\s)\]>'"]+)/gi,
+      (url) => {
+        const cleaned = url.replace(/[.,;:!?)。）」】]+$/u, '');
+        return `![image](${cleaned})`;
       }
     );
     return input;
@@ -457,6 +472,42 @@
         video.src = href;
         anchor.replaceWith(video);
       }
+    });
+
+    // Text nodes that still contain bare /v1/files/video URLs → insert <video>
+    const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+    textNodes.forEach((node) => {
+      const value = node.nodeValue || '';
+      if (!/\/v1\/files\/(?:video|image)\?/i.test(value)) return;
+      const parts = value.split(/((?:https?:\/\/[^\s]+)?\/v1\/files\/(?:video|image)\?[^\s]+)/i);
+      if (parts.length < 2) return;
+      const frag = document.createDocumentFragment();
+      parts.forEach((part) => {
+        if (/\/v1\/files\/video\?/i.test(part)) {
+          const cleaned = part.replace(/[.,;:!?)。）」】]+$/u, '');
+          const video = document.createElement('video');
+          video.controls = true;
+          video.preload = 'metadata';
+          video.src = cleaned;
+          frag.appendChild(video);
+          const trail = part.slice(cleaned.length);
+          if (trail) frag.appendChild(document.createTextNode(trail));
+        } else if (/\/v1\/files\/image\?/i.test(part)) {
+          const cleaned = part.replace(/[.,;:!?)。）」】]+$/u, '');
+          const img = document.createElement('img');
+          img.src = cleaned;
+          img.alt = 'image';
+          img.loading = 'lazy';
+          frag.appendChild(img);
+          const trail = part.slice(cleaned.length);
+          if (trail) frag.appendChild(document.createTextNode(trail));
+        } else if (part) {
+          frag.appendChild(document.createTextNode(part));
+        }
+      });
+      node.parentNode && node.parentNode.replaceChild(frag, node);
     });
 
     card.querySelectorAll('video').forEach((video) => {

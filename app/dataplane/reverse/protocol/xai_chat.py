@@ -12,7 +12,6 @@ from app.platform.config.snapshot import get_config
 from app.control.model.enums import ModeId
 from app.dataplane.reverse.protocol.sandbox_artifacts import (
     base64_target_from_bash_command,
-    looks_like_base64,
     merge_personality_with_artifact_hint,
     paths_from_bash_command,
 )
@@ -246,6 +245,7 @@ class StreamAdapter:
         "used_code_execution",
         "_pending_base64_path",
         "_last_bash_command",
+        "_b64_part_buf",
     )
 
     def __init__(self) -> None:
@@ -273,6 +273,8 @@ class StreamAdapter:
         self.used_code_execution: bool = False
         self._pending_base64_path: str | None = None
         self._last_bash_command: str = ""
+        # Accumulate all tool stdout for chunked B64PART reassembly across steps
+        self._b64_part_buf: list[str] = []
 
     # 搜索信源追加：当配置启用且有 webSearchResults 时，格式化为 ## Sources 段落
     # 标记行 [grok2api-sources]: # 是 markdown link reference definition，渲染器不显示，
@@ -795,23 +797,60 @@ class StreamAdapter:
 
     def _harvest_code_execution_result(self, resp: dict[str, Any]) -> None:
         """Capture base64 stdout produced for a pending sandbox media path."""
+        from app.dataplane.reverse.protocol.sandbox_artifacts import (
+            extract_base64_payload,
+            reassemble_b64_parts,
+        )
+
         cer = resp.get("codeExecutionResult")
         if not isinstance(cer, dict):
             return
         stdout = str(cer.get("stdout") or "")
-        if not stdout or not looks_like_base64(stdout.strip()):
+        stderr = str(cer.get("stderr") or "")
+        combined = stdout + "\n" + stderr
+        if combined.strip():
+            self._b64_part_buf.append(combined)
+
+        # Prefer reassembly across all tool stdout so far (chunked transfer)
+        all_out = "\n".join(self._b64_part_buf)
+        b64 = reassemble_b64_parts(all_out)
+        if not b64:
+            # Only fall back to monolithic base64 when not in chunked mode
+            if "B64META:" in all_out or "B64PART:" in all_out:
+                return  # wait for remaining parts
+            b64 = extract_base64_payload(combined)
+        if not b64:
             return
-        b64 = re.sub(r"\s+", "", stdout.strip())
+
         path = self._pending_base64_path
+        # B64META:<name>:<len> may name the file
+        meta = re.search(r"B64META:([^\s:]+):(\d+)", all_out)
+        if meta:
+            name = meta.group(1)
+            if not name.startswith("/"):
+                path = f"/home/workdir/artifacts/{name}"
+            else:
+                path = name
+            self.sandbox_media_paths.add(path)
+
         if path is None and self.sandbox_media_paths:
-            # associate with the most recently tracked path
             path = next(reversed(list(self.sandbox_media_paths)))
         if path is None:
-            # keep under a synthetic key for later association by extension
             path = f"/home/workdir/artifacts/stdout_{len(self.sandbox_media_b64)}.bin"
             self.sandbox_media_paths.add(path)
-        self.sandbox_media_b64[path] = b64
-        self._pending_base64_path = None
+
+        prev = self.sandbox_media_b64.get(path)
+        if prev is None or len(b64) > len(prev):
+            self.sandbox_media_b64[path] = b64
+            logger.info(
+                "sandbox base64 harvested: path={} b64_len={} parts_buf={}",
+                path,
+                len(b64),
+                len(self._b64_part_buf),
+            )
+        # Don't clear pending on partial single dumps — only after we have something
+        if "B64END" in combined or reassemble_b64_parts(all_out):
+            self._pending_base64_path = None
 
 
 __all__ = [

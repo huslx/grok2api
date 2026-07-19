@@ -711,20 +711,15 @@ async def completions(
                                 adapter, source_text
                             )
                             if buffered_final:
-                                # Flush cleaned final answer once (paths rewritten, B64 stripped)
+                                # Flush cleaned final answer once (paths rewritten, B64 stripped).
+                                # rewritten already includes appended [video]/![image] embeds.
                                 if rewritten:
                                     chunk = make_stream_chunk(
                                         response_id, model, rewritten
                                     )
                                     yield f"data: {orjson.dumps(chunk).decode()}\n\n"
-                                for embed in sandbox_embeds:
-                                    if embed and embed not in rewritten:
-                                        chunk = make_stream_chunk(
-                                            response_id, model, "\n\n" + embed
-                                        )
-                                        yield f"data: {orjson.dumps(chunk).decode()}\n\n"
                             else:
-                                # Text already streamed; only append missing playable embeds
+                                # Text already streamed; append missing playable embeds only
                                 for embed in sandbox_embeds:
                                     if embed and embed not in source_text:
                                         chunk = make_stream_chunk(
