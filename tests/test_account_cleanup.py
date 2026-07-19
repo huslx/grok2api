@@ -175,7 +175,8 @@ class AccountCleanupConfigTests(unittest.TestCase):
         self.assertIn("deleted_retention_days = 7", text)
         self.assertIn('run_at = "03:30"', text)
         self.assertIn("batch_size = 5000", text)
-        self.assertIn("vacuum = true", text)
+        # Default is false: VACUUM on large DBs locks the whole file for seconds.
+        self.assertIn("vacuum = false", text)
 
     def test_admin_config_schema_exposes_deleted_account_cleanup(self):
         html = (_ROOT / "app/statics/admin/config.html").read_text(encoding="utf-8")

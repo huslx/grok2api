@@ -48,5 +48,48 @@ async function verifyKey(url, key) {
   return (await fetch(url, { headers: key ? { Authorization: `Bearer ${key}` } : {} })).ok;
 }
 
-function adminLogout() { adminKey.clear(); webuiKey.clear(); location.href='/admin/login'; }
-function webuiLogout() { webuiKey.clear(); location.href='/webui/login'; }
+/** Mint a short-lived SSE ticket so EventSource never needs ?app_key= in the URL. */
+async function adminSseTicket() {
+  const key = await adminKey.get();
+  const res = await fetch(`${ADMIN_API}/sse-ticket`, {
+    method: 'POST',
+    headers: key ? { Authorization: `Bearer ${key}` } : {},
+  });
+  if (!res.ok) throw new Error(`sse-ticket ${res.status}`);
+  const data = await res.json();
+  if (!data?.ticket) throw new Error('sse-ticket missing ticket');
+  return data.ticket;
+}
+
+/** Build an admin EventSource URL authenticated via sse_ticket (fallback: app_key). */
+async function adminEventSourceUrl(path) {
+  const base = path.startsWith('http') ? path : `${ADMIN_API}${path.startsWith('/') ? path : '/' + path}`;
+  try {
+    const ticket = await adminSseTicket();
+    const join = base.includes('?') ? '&' : '?';
+    return `${base}${join}sse_ticket=${encodeURIComponent(ticket)}`;
+  } catch {
+    const key = await adminKey.get();
+    const join = base.includes('?') ? '&' : '?';
+    return `${base}${join}app_key=${encodeURIComponent(key)}`;
+  }
+}
+
+async function _clearSessionCookie(url) {
+  try {
+    await fetch(url, { method: 'POST', credentials: 'same-origin' });
+  } catch {}
+}
+
+async function adminLogout() {
+  await _clearSessionCookie(`${ADMIN_API}/session/logout`);
+  adminKey.clear();
+  webuiKey.clear();
+  location.href = '/admin/login';
+}
+
+async function webuiLogout() {
+  await _clearSessionCookie(`${WEBUI_API}/session/logout`);
+  webuiKey.clear();
+  location.href = '/webui/login';
+}

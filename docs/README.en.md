@@ -306,7 +306,9 @@ Deeply nested keys are easier to edit in `config.toml` or the Admin UI.
 | `temporary` | `true` | Temporary chats |
 | `auto_chat_mode_fallback` | `true` | Fall back from AUTO when quota is exhausted |
 | `image_format` | `grok_url` | `grok_url` / `local_url` / `grok_md` / `local_md` / `base64` |
+| `imagine_public_image_proxy` | `false` | Download & locally proxy imagine-public images from WebSocket |
 | `video_format` | `grok_url` | `grok_url` / `local_url` / `grok_html` / `local_html` |
+| `imagine_public_video_proxy` | `false` | Download & locally proxy imagine-public videos from upstream |
 | `enable_nsfw` | `true` | Allow NSFW image-related features |
 | `auto_oidc_on_import` | `true` | Auto SSO→OIDC after import |
 | `show_search_sources` | `false` | Append `## Sources` text to the body |

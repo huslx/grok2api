@@ -14,13 +14,18 @@ _security = HTTPBearer(auto_error=False, scheme_name="API Key")
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _get_keys() -> list[str]:
+def get_api_keys() -> list[str]:
+    """Return configured API keys (empty list means auth is disabled)."""
     raw = get_config("app.api_key", "")
     if not raw:
         return []
     if isinstance(raw, list):
         return [str(k).strip() for k in raw if str(k).strip()]
     return [k.strip() for k in str(raw).split(",") if k.strip()]
+
+
+def _get_keys() -> list[str]:
+    return get_api_keys()
 
 
 def get_admin_key() -> str:
@@ -81,22 +86,42 @@ async def verify_api_key(
 async def verify_admin_key(
     authorization: str | None = Header(default=None),
     app_key: str | None = Query(default=None),
+    sse_ticket: str | None = Query(default=None, alias="sse_ticket"),
 ) -> None:
-    """Validate Bearer token against ``app.app_key`` (admin access).
+    """Validate admin access.
 
-    Accepts either ``Authorization: Bearer <key>`` header or ``?app_key=<key>``
-    query parameter (the latter is needed for EventSource which cannot send headers).
+    Accepts, in order of preference:
+
+    1. ``Authorization: Bearer <app_key>``
+    2. ``?sse_ticket=<ticket>`` — short-lived EventSource ticket (preferred over #3)
+    3. ``?app_key=<key>`` — legacy fallback for EventSource; logs warn when used
     """
+    from app.platform.auth.sse_ticket import validate_sse_ticket
+    from app.platform.logging.logger import logger
+
     key = get_admin_key()
     if not key:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Admin key is not configured.")
 
-    token = _extract_bearer(authorization) or app_key
-    if token is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing authentication token.")
-
-    if not hmac.compare_digest(token, key):
+    token = _extract_bearer(authorization)
+    if token is not None:
+        if hmac.compare_digest(token, key):
+            return
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid authentication token.")
+
+    if validate_sse_ticket(sse_ticket):
+        return
+
+    if app_key is not None:
+        if hmac.compare_digest(app_key, key):
+            logger.warning(
+                "admin auth used deprecated query app_key; "
+                "prefer Authorization header or short-lived sse_ticket"
+            )
+            return
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid authentication token.")
+
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing authentication token.")
 
 
 async def verify_webui_key(
@@ -122,6 +147,7 @@ __all__ = [
     "verify_admin_key",
     "verify_webui_key",
     "get_admin_key",
+    "get_api_keys",
     "get_webui_key",
     "is_webui_enabled",
 ]

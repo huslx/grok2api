@@ -21,7 +21,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -296,6 +295,30 @@ async def lifespan(app: FastAPI):
         name="deleted-account-cleanup",
     ) if is_leader else None
 
+    # Security posture warnings (never fail startup — operators may self-host on LAN).
+    _admin_key = str(_config.get_str("app.app_key", "") or "")
+    _api_key_raw = _config.get("app.api_key", "")
+    _has_api_key = bool(
+        _api_key_raw
+        if not isinstance(_api_key_raw, list)
+        else any(str(k).strip() for k in _api_key_raw)
+    )
+    if not _admin_key or _admin_key == "grok2api":
+        logger.warning(
+            "security: default or empty app.app_key in use — "
+            "change it immediately in /admin/config"
+        )
+    if not _has_api_key:
+        logger.warning(
+            "security: app.api_key is empty — /v1 API authentication is DISABLED"
+        )
+    cors_raw = _config.get("app.cors_origins", [])
+    if not cors_raw or cors_raw == ["*"] or cors_raw == "*":
+        logger.info(
+            "security: app.cors_origins empty/wildcard — "
+            "CORS allows all origins without credentials"
+        )
+
     logger.info("application startup completed")
     yield
 
@@ -403,13 +426,92 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Pure ASGI CORS middleware (not BaseHTTPMiddleware) so SSE/stream bodies
+    # are never buffered. Reads live config — never pairs "*" with credentials.
+    class DynamicCORSMiddleware:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+
+            headers = {
+                k.decode("latin-1").lower(): v.decode("latin-1")
+                for k, v in scope.get("headers", [])
+            }
+            origin = headers.get("origin")
+            method = scope.get("method", "GET").upper()
+
+            try:
+                await _config.load()
+            except Exception:
+                pass
+
+            raw = _config.get("app.cors_origins", [])
+            if isinstance(raw, str):
+                allowlist = [o.strip() for o in raw.split(",") if o.strip()]
+            elif isinstance(raw, list):
+                allowlist = [str(o).strip() for o in raw if str(o).strip()]
+            else:
+                allowlist = []
+
+            cors_headers: list[tuple[bytes, bytes]] = []
+            if origin:
+                req_headers = headers.get("access-control-request-headers", "*")
+                methods = b"GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+                if not allowlist:
+                    cors_headers = [
+                        (b"access-control-allow-origin", b"*"),
+                        (b"access-control-allow-methods", methods),
+                        (
+                            b"access-control-allow-headers",
+                            req_headers.encode("latin-1"),
+                        ),
+                    ]
+                elif origin in allowlist:
+                    cors_headers = [
+                        (
+                            b"access-control-allow-origin",
+                            origin.encode("latin-1"),
+                        ),
+                        (b"access-control-allow-credentials", b"true"),
+                        (b"access-control-allow-methods", methods),
+                        (
+                            b"access-control-allow-headers",
+                            req_headers.encode("latin-1"),
+                        ),
+                        (b"vary", b"Origin"),
+                    ]
+
+            # Preflight short-circuit
+            if method == "OPTIONS" and origin and cors_headers:
+                async def _preflight_send(message):
+                    # unused — we craft the response ourselves
+                    pass
+
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 204,
+                        "headers": cors_headers
+                        + [(b"content-length", b"0")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b""})
+                return
+
+            async def send_with_cors(message):
+                if message["type"] == "http.response.start" and cors_headers:
+                    raw_headers = list(message.get("headers") or [])
+                    raw_headers.extend(cors_headers)
+                    message = {**message, "headers": raw_headers}
+                await send(message)
+
+            await self.app(scope, receive, send_with_cors)
+
+    app.add_middleware(DynamicCORSMiddleware)
 
     # Ensure config is loaded on every request.
     @app.middleware("http")

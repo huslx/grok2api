@@ -15,6 +15,7 @@ import orjson
 from app.platform.logging.logger import logger
 from app.platform.config.snapshot import get_config
 from app.platform.errors import UpstreamError, ValidationError
+from app.platform.net.url_safety import assert_safe_fetch_url
 from app.dataplane.proxy import get_proxy_runtime
 from app.dataplane.proxy.adapters.headers import build_sso_cookie
 from app.dataplane.proxy.adapters.headers import build_http_headers
@@ -183,13 +184,15 @@ async def upload_from_input(token: str, file_input: str) -> tuple[str, str]:
     """
     if _is_url(file_input):
         # Fetch the remote URL and re-upload as base64.
+        # SSRF guard: reject private / metadata / non-http(s) targets before fetch.
+        safe_url = assert_safe_fetch_url(file_input, param="content")
         proxy = await get_proxy_runtime()
         lease = await proxy.acquire()
         try:
             headers = build_http_headers(token, lease=lease)
             kwargs  = build_session_kwargs(lease=lease)
             async with ResettableSession(**kwargs) as session:
-                resp = await session.get(file_input, headers=headers, timeout=30.0)
+                resp = await session.get(safe_url, headers=headers, timeout=30.0)
             raw  = resp.content
             if resp.status_code != 200:
                 await proxy.feedback(
@@ -206,9 +209,11 @@ async def upload_from_input(token: str, file_input: str) -> tuple[str, str]:
                 )
             mime     = (resp.headers.get("content-type", "").split(";")[0].strip()
                         or "application/octet-stream")
-            filename = file_input.split("/")[-1].split("?")[0] or "download"
+            filename = safe_url.split("/")[-1].split("?")[0] or "download"
             b64      = base64.b64encode(raw).decode()
         except UpstreamError:
+            raise
+        except ValidationError:
             raise
         except Exception as exc:
             await proxy.feedback(lease, ProxyFeedback(kind=ProxyFeedbackKind.TRANSPORT_ERROR))

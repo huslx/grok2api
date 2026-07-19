@@ -398,6 +398,10 @@
           "label": "API Access Key",
           "desc": "Authentication key for the OpenAI-compatible API. Separate multiple values with commas. Leave blank to disable authentication."
         },
+        "corsOrigins": {
+          "label": "CORS Allowed Origins",
+          "desc": "Comma-separated Origin allow-list. Empty = allow all origins without credentials; when set, only listed origins are allowed and credentials are enabled."
+        },
         "webuiEnabled": {
           "label": "Enable WebUI",
           "desc": "Exposes the WebUI entry point. When disabled, related routes return 404."
@@ -456,7 +460,11 @@
         },
         "videoFormat": {
           "label": "Video Output Format",
-          "desc": "local_* modes download video assets to the server and deliver them through the local proxy. Configure the APP Base URL first and account for outbound bandwidth usage."
+          "desc": "grok_url and grok_html return the native Grok CDN address directly by default. local_* modes download video assets to the server and deliver them through the local proxy. When Imagine Public Video Proxy is enabled, imagine-public videos are also proxied locally. Configure the APP Base URL first and account for outbound bandwidth usage."
+        },
+        "imaginePublicVideoProxy": {
+          "label": "Imagine Public Video Proxy",
+          "desc": "When enabled, imagine-public videos returned by upstream are downloaded to the server and delivered through the local proxy. When disabled, public videos are returned directly."
         },
         "refreshEnabled": {
           "label": "Enable Quota Refresh",

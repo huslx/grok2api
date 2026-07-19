@@ -12,4 +12,6 @@ if [ ! -f "$DATA_DIR/config.toml" ]; then
   cp "$DEFAULT_CONFIG" "$DATA_DIR/config.toml"
 fi
 
-chmod 600 "$DATA_DIR/config.toml" || true
+# Best-effort: tighten perms when the process owns the files (non-root container).
+chmod 600 "$DATA_DIR/config.toml" 2>/dev/null || true
+chmod 700 "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true

@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.platform.auth.media_sign import build_signed_media_path
 from app.platform.config.snapshot import get_config
 from app.platform.errors import AppError, ErrorKind
 from app.platform.storage import (
@@ -92,10 +93,13 @@ def _list_files(media_type: str, page: int, page_size: int) -> dict[str, Any]:
     items = []
     for f in chunk:
         st = f.stat()
+        file_id = f.stem
         items.append({
             "name": f.name,
             "size_bytes": st.st_size,
             "modified_at": st.st_mtime,
+            # Signed path so admin preview works without browser API-key headers.
+            "url": build_signed_media_path(media_type, file_id),
         })
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 

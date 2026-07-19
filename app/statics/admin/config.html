@@ -398,6 +398,7 @@ const SCHEMA_DEF = [
           { key: 'app_url', label: 'APP 访问地址', labelKey: 'config.schema.fields.appUrl.label', type: 'text', desc: '应用对外提供服务的根 URL，格式如 https://your-domain.com。本地代理模式必须配置。', descKey: 'config.schema.fields.appUrl.desc', wide: true },
           { key: 'app_key', label: 'APP 访问密码', labelKey: 'config.schema.fields.appKey.label', type: 'password', desc: '管理后台鉴权密码。修改后已有 Session 将立即失效，需重新登录。', descKey: 'config.schema.fields.appKey.desc', rand: true },
           { key: 'api_key', label: 'API 调用密钥', labelKey: 'config.schema.fields.apiKey.label', type: 'text', desc: 'OpenAI 兼容 API 的鉴权密钥。多个值请使用英文逗号分隔；留空则禁用鉴权。', descKey: 'config.schema.fields.apiKey.desc', rand: true },
+          { key: 'cors_origins', label: 'CORS 允许来源', labelKey: 'config.schema.fields.corsOrigins.label', type: 'text', desc: '逗号分隔的 Origin 白名单。留空=允许所有来源且不带 credentials；填写后仅放行列表内 Origin 并启用 credentials。', descKey: 'config.schema.fields.corsOrigins.desc', wide: true },
           { key: 'webui_enabled', label: '启用 WebUI', labelKey: 'config.schema.fields.webuiEnabled.label', type: 'bool', desc: '开放 WebUI 功能入口。关闭后相关路由将返回 404。', descKey: 'config.schema.fields.webuiEnabled.desc' },
           { key: 'webui_key', label: 'WebUI 访问密码', labelKey: 'config.schema.fields.webuiKey.label', type: 'password', desc: 'WebUI 的访问鉴权密码。配置后访问时必须提供。', descKey: 'config.schema.fields.webuiKey.desc', rand: true, showIf: 'app.webui_enabled' },
         ]
@@ -489,8 +490,16 @@ const SCHEMA_DEF = [
               { value: 'grok_html', label: 'HTML（Grok 原生）', labelKey: 'config.schema.options.videoFormat.grokHtml' },
               { value: 'local_html', label: 'HTML（本地代理）', labelKey: 'config.schema.options.videoFormat.localHtml', disabledWhen: 'no_app_url', disabledTip: '请先填写 APP 访问地址', disabledTipKey: 'config.disabledTip.appUrlRequired' },
             ],
-            desc: 'local_* 模式会先将视频下载至服务端，再通过本地 URL 代理分发；请确保已配置 APP 访问地址，并评估出站带宽消耗。',
+            desc: 'grok_url / grok_html 默认直接返回 Grok CDN 地址；local_* 模式会先将视频下载至服务端，再通过本地 URL 代理分发。开启 Imagine Public 视频代理后，imagine-public 视频也会本地代理。请确保已配置 APP 访问地址，并评估出站带宽消耗。',
             descKey: 'config.schema.fields.videoFormat.desc',
+          },
+          {
+            key: 'imagine_public_video_proxy',
+            label: 'Imagine Public 视频代理',
+            labelKey: 'config.schema.fields.imaginePublicVideoProxy.label',
+            type: 'bool',
+            desc: '开启后将上游返回的 imagine-public 视频下载到服务端，再通过本地 URL 代理分发；关闭时保持公开视频直返。',
+            descKey: 'config.schema.fields.imaginePublicVideoProxy.desc',
           },
         ]
       },
@@ -1092,12 +1101,13 @@ function renderInput(field, section, value) {
     return inp;
   }
 
-  // text / password
+  // text / password (arrays from config, e.g. cors_origins, render as CSV)
+  const textValue = Array.isArray(value) ? value.join(', ') : (value ?? '');
   const inp = _el('input', {
     class: `cfg-text${field.wide ? ' wide' : ''}`,
     type: field.type === 'password' ? 'password' : 'text',
     id: `field-${section}-${field.key}`,
-    value: value ?? '',
+    value: textValue,
     autocomplete: 'off',
   });
   inp.addEventListener('input', () => onChange(inp.value));

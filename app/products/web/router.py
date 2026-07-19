@@ -3,9 +3,13 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from app.platform.auth.middleware import is_webui_enabled, verify_webui_key
+from app.platform.auth.session_cookie import (
+    attach_session_cookie,
+    clear_session_cookie,
+)
 from app.platform.meta import get_project_version
 from app.platform.update_check import get_latest_release_info
 from .static_html import serve_static_html
@@ -72,7 +76,26 @@ async def webui_login():
 
 @router.get("/webui/api/verify", dependencies=[Depends(verify_webui_key)], tags=["WebUI - System"])
 async def webui_verify():
-    return {"status": "ok"}
+    """Validate webui access and mint a browser session cookie for media access."""
+    response = JSONResponse({"status": "ok"})
+    attach_session_cookie(response, "webui")
+    return response
+
+
+@router.post("/admin/api/session/logout", include_in_schema=False)
+async def admin_session_logout():
+    """Clear browser session cookie (no auth required — only drops own cookie)."""
+    response = JSONResponse({"status": "success"})
+    clear_session_cookie(response)
+    return response
+
+
+@router.post("/webui/api/session/logout", include_in_schema=False)
+async def webui_session_logout():
+    """Clear browser session cookie for WebUI logout."""
+    response = JSONResponse({"status": "success"})
+    clear_session_cookie(response)
+    return response
 
 
 @router.get("/meta", include_in_schema=False)

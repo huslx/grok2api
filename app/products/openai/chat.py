@@ -259,14 +259,12 @@ async def _resolve_image(token: str, url: str, image_id: str) -> str:
         b64 = base64.b64encode(raw).decode()
         return f"![image](data:{mime};base64,{b64})"
 
-    # local_url / local_md: save to disk and return local path
+    # local_url / local_md: save to disk and return signed local proxy URL
+    from app.platform.auth.media_sign import build_signed_media_url
+
     file_id = await asyncio.to_thread(_save_image, raw, mime, image_id)
     app_url = cfg.get_str("app.app_url", "").rstrip("/")
-    local_url = (
-        f"{app_url}/v1/files/image?id={file_id}"
-        if app_url
-        else f"/v1/files/image?id={file_id}"
-    )
+    local_url = build_signed_media_url("image", file_id, app_url=app_url)
 
     if fmt in {"grok_url", "local_url"}:
         return local_url

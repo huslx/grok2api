@@ -398,6 +398,10 @@
           "label": "API 调用密钥",
           "desc": "OpenAI 兼容 API 的鉴权密钥。多个值请使用英文逗号分隔；留空则禁用鉴权。"
         },
+        "corsOrigins": {
+          "label": "CORS 允许来源",
+          "desc": "逗号分隔的 Origin 白名单。留空=允许所有来源且不带 credentials；填写后仅放行列表内 Origin 并启用 credentials。"
+        },
         "webuiEnabled": {
           "label": "启用 WebUI",
           "desc": "开放 WebUI 功能入口。关闭后相关路由将返回 404。"
@@ -456,7 +460,11 @@
         },
         "videoFormat": {
           "label": "视频返回格式",
-          "desc": "local_* 模式会先将视频下载至服务端，再通过本地 URL 代理分发；请确保已配置 APP 访问地址，并评估出站带宽消耗。"
+          "desc": "grok_url / grok_html 默认直接返回 Grok CDN 地址；local_* 模式会先将视频下载至服务端，再通过本地 URL 代理分发。开启 Imagine Public 视频代理后，imagine-public 视频也会本地代理。请确保已配置 APP 访问地址，并评估出站带宽消耗。"
+        },
+        "imaginePublicVideoProxy": {
+          "label": "Imagine Public 视频代理",
+          "desc": "开启后将上游返回的 imagine-public 视频下载到服务端，再通过本地 URL 代理分发；关闭时保持公开视频直返。"
         },
         "refreshEnabled": {
           "label": "启用配额刷新",

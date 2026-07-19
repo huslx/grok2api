@@ -308,7 +308,9 @@ uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
 | `temporary` | `true` | 临时对话 |
 | `auto_chat_mode_fallback` | `true` | AUTO 额度耗尽时降级到 fast/expert |
 | `image_format` | `grok_url` | 图片返回：`grok_url` / `local_url` / `grok_md` / `local_md` / `base64` |
+| `imagine_public_image_proxy` | `false` | 将 WebSocket 返回的 imagine-public 图片下载并本地代理 |
 | `video_format` | `grok_url` | 视频返回：`grok_url` / `local_url` / `grok_html` / `local_html` |
+| `imagine_public_video_proxy` | `false` | 将上游返回的 imagine-public 视频下载并本地代理 |
 | `enable_nsfw` | `true` | 是否允许 NSFW 图片相关能力 |
 | `auto_oidc_on_import` | `true` | 导入账号后自动 SSO→OIDC |
 | `show_search_sources` | `false` | 是否在正文末追加 `## Sources` 文本 |

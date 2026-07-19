@@ -55,7 +55,11 @@ RUN apk add --no-cache \
     openssl \
     libgcc \
     libstdc++ \
-    libcurl
+    libcurl \
+    wget \
+    su-exec \
+    && addgroup -S -g 1000 app \
+    && adduser -S -u 1000 -G app -h /app -s /sbin/nologin app
 
 WORKDIR /app
 
@@ -66,7 +70,11 @@ COPY app ./app
 COPY scripts ./scripts
 
 RUN mkdir -p /app/data /app/logs \
-    && chmod +x /app/scripts/entrypoint.sh /app/scripts/init_storage.sh
+    && chmod +x /app/scripts/entrypoint.sh /app/scripts/init_storage.sh \
+    && chown -R app:app /app/data /app/logs
+
+# Process starts as root only long enough for entrypoint to chown volumes,
+# then drops to uid 1000 via su-exec (see scripts/entrypoint.sh).
 
 EXPOSE 8000
 

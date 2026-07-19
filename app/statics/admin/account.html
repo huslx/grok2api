@@ -1943,8 +1943,8 @@ async function _runBatch(endpoint, tokens, label, onDone) {
     _batchTaskId = d.task_id;
     const total = d.total || tokens.length;
 
-    const key = await adminKey.get();
-    const es = new EventSource(`${ADMIN_API}/batch/${_batchTaskId}/stream?app_key=${encodeURIComponent(key)}`);
+    const esUrl = await adminEventSourceUrl(`/batch/${_batchTaskId}/stream`);
+    const es = new EventSource(esUrl);
     _batchEs = es;
     _batchStarting = false;
 

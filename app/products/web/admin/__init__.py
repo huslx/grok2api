@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import orjson
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import RootModel
 
 from app.control.account.backends.factory import get_repository_backend
@@ -179,7 +179,24 @@ router.include_router(_cache_router)
 
 @router.get("/verify", tags=[_TAG_ADMIN_SYSTEM])
 async def admin_verify():
-    return {"status": "success"}
+    """Validate admin key and mint a browser session cookie for media access."""
+    from app.platform.auth.session_cookie import attach_session_cookie
+
+    response = JSONResponse({"status": "success"})
+    attach_session_cookie(response, "admin")
+    return response
+
+
+@router.post("/sse-ticket", tags=[_TAG_ADMIN_SYSTEM])
+async def issue_admin_sse_ticket():
+    """Mint a short-lived ticket for EventSource admin streams.
+
+    Prefer this over putting ``app_key`` in the query string (logs / history).
+    """
+    from app.platform.auth.sse_ticket import issue_sse_ticket
+
+    ticket = issue_sse_ticket(ttl_sec=120)
+    return {"ticket": ticket, "expires_in": 120}
 
 
 @router.get("/config", tags=[_TAG_ADMIN_SYSTEM])

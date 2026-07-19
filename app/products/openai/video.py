@@ -585,12 +585,10 @@ def _save_video_bytes(raw: bytes, file_id: str) -> Path:
 
 
 def _local_video_url(file_id: str) -> str:
+    from app.platform.auth.media_sign import build_signed_media_url
+
     app_url = get_config().get_str("app.app_url", "").rstrip("/")
-    return (
-        f"{app_url}/v1/files/video?id={file_id}"
-        if app_url
-        else f"/v1/files/video?id={file_id}"
-    )
+    return build_signed_media_url("video", file_id, app_url=app_url)
 
 
 def _normalize_video_format(value: str | None) -> str:
@@ -603,29 +601,59 @@ def _normalize_video_format(value: str | None) -> str:
     return fmt
 
 
+def _is_imagine_public_url(url: str) -> bool:
+    """Return True when *url* is hosted on an imagine-public CDN host."""
+    try:
+        host = urlparse(url or "").hostname or ""
+    except Exception:
+        return False
+    return host.startswith("imagine-public")
+
+
 def _render_video_html(url: str) -> str:
     safe_url = html.escape(url, quote=True)
     return f'<video controls src="{safe_url}"></video>'
 
 
 async def _resolve_video_output(*, token: str, url: str, file_id: str) -> str:
-    fmt = _normalize_video_format(
-        get_config().get_str("features.video_format", "grok_url")
+    """Return the video embed/URL text based on video_format config.
+
+    Format values:
+      grok_url   — raw CDN URL (no download)
+      local_url  — download + serve locally, return accessible URL
+      grok_html  — HTML <video> with Grok CDN src
+      local_html — HTML <video> with local proxy src
+
+    When ``features.imagine_public_video_proxy`` is enabled, imagine-public
+    video URLs are always downloaded and re-hosted even under grok_url /
+    grok_html formats (mirrors ``imagine_public_image_proxy`` for images).
+    """
+    cfg = get_config()
+    fmt = _normalize_video_format(cfg.get_str("features.video_format", "grok_url"))
+
+    proxy_imagine_public = (
+        _is_imagine_public_url(url)
+        and cfg.get_bool("features.imagine_public_video_proxy", False)
     )
-    if fmt == "grok_url":
+
+    # Formats that don't need downloading
+    if fmt == "grok_url" and not proxy_imagine_public:
         return url
-    if fmt == "grok_html":
+    if fmt == "grok_html" and not proxy_imagine_public:
         return _render_video_html(url)
 
+    # Formats that require downloading (local_* or forced imagine-public proxy)
     try:
         raw, _mime = await _download_video_bytes(token, url)
         await asyncio.to_thread(_save_video_bytes, raw, file_id)
     except Exception as exc:
         logger.debug("video download fallback_to=upstream_url error={}", exc)
-        return url if fmt == "local_url" else _render_video_html(url)
+        return url if fmt in {"local_url", "grok_url"} else _render_video_html(url)
 
     local_url = _local_video_url(file_id)
-    return local_url if fmt == "local_url" else _render_video_html(local_url)
+    if fmt in {"local_url", "grok_url"}:
+        return local_url
+    return _render_video_html(local_url)  # local_html / grok_html
 
 
 async def _generate_video_with_token(

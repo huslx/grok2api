@@ -829,6 +829,11 @@ function viewFile(name) {
 }
 
 function localFileUrl(name) {
+  // Prefer server-signed URL when present; bare id URL also works after admin login
+  // (browser session cookie grok2api_session is set by /admin/api/verify).
+  const item = (_localItems || []).find((row) => row.name === name);
+  if (item && item.url) return item.url;
+
   const raw = String(name || '');
   const dot = raw.lastIndexOf('.');
   if (dot <= 0) return '';
@@ -1166,8 +1171,8 @@ async function runAssetClear(tokens) {
     const d = await _api('POST', '/batch/cache-clear?async=true', { tokens });
     _assetTaskId = d.task_id;
     const total = d.total || tokens.length;
-    const key = await adminKey.get();
-    const es = new EventSource(`${ADMIN_API}/batch/${_assetTaskId}/stream?app_key=${encodeURIComponent(key)}`);
+    const esUrl = await adminEventSourceUrl(`/batch/${_assetTaskId}/stream`);
+    const es = new EventSource(esUrl);
     _assetEs = es;
 
     es.onmessage = (event) => {

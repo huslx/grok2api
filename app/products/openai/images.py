@@ -175,8 +175,9 @@ def _app_url() -> str:
 
 
 def _local_image_url(file_id: str) -> str:
-    app_url = _app_url()
-    return f"{app_url}/v1/files/image?id={file_id}"
+    from app.platform.auth.media_sign import build_signed_media_url
+
+    return build_signed_media_url("image", file_id, app_url=_app_url())
 
 
 def _extract_image_file_id(url: str) -> str:
