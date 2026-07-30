@@ -1,8 +1,9 @@
 """CLI Responses API handler — /v1/responses for cli-chat-proxy models.
 
-``grok-4.5`` / ``grok-4.5-console`` only work on cli-chat-proxy.grok.com.
-``/v1/chat/completions`` already routes there; this module does the same for
-the Responses API surface that Codex uses (wire_api = "responses").
+``grok-4.5`` uses cli-chat-proxy.grok.com (OIDC).
+``grok-4.5-console`` uses console.x.ai (SSO) via the console handlers.
+``/v1/chat/completions`` already routes CLI capability here; this module does
+the same for the Responses API surface that Codex uses (wire_api = "responses").
 """
 
 from __future__ import annotations

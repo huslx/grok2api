@@ -223,7 +223,8 @@ After enabling the reverse proxy, set `app.app_url` to `https://your.domain.com`
 | :-- | :-- | :-- | :-- |
 | **Paid** | `sso` cookie from grok.com / x.ai | `grok-4.20-*`, `grok-4.3-beta`, Imagine, etc. | Official web / paid quota |
 | **Free Console** | `sso` + optional CF Clearance | `*-console`, `grok-4.3-{low,medium,high}` | Routed via `console.x.ai` |
-| **CLI (grok-4.5)** | Same `sso`, OIDC at runtime | `grok-4.5`, `grok-4.5-console` | Requires SSO→OIDC (can be automatic) |
+| **CLI (grok-4.5)** | Same `sso`, OIDC at runtime | `grok-4.5` | Requires SSO→OIDC (can be automatic) |
+| **Console grok-4.5** | Same `sso` as Bearer | `grok-4.5-console` | Via `console.x.ai`, no OIDC |
 
 Admin path: **Admin → Account**. Batch paste accepts an optional `sso=` prefix.
 
@@ -248,6 +249,8 @@ Admin path: **Admin → Account**. Batch paste accepts an optional `sso=` prefix
 ### CLI / grok-4.5 (OIDC)
 
 `grok-4.5` uses the CLI path and needs an OIDC `access_token` obtained from SSO via Device Flow.
+
+`grok-4.5-console` uses `console.x.ai` with the SSO as Bearer — **no OIDC required**.
 
 Defaults from `config.defaults.toml`:
 
@@ -409,7 +412,8 @@ Bootstrap-time variables (`.env` / Compose / `docker run -e`). Template: [`.env.
 | :-- | :-- |
 | `grok-4.3-console` | Console default |
 | `grok-4.3-low` / `medium` / `high` | Thinking effort variants |
-| `grok-4.5` / `grok-4.5-console` | CLI (OIDC) |
+| `grok-4.5` | CLI (OIDC) |
+| `grok-4.5-console` | Console (SSO) |
 | `grok-4.20-0309-console` | Console |
 | `grok-4.20-0309-non-reasoning-console` | Console non-reasoning |
 | `grok-4.20-0309-reasoning-console` | Console fixed reasoning |
@@ -511,6 +515,8 @@ curl http://localhost:8000/v1/chat/completions \
     ]
   }'
 ```
+
+For Console (SSO, no OIDC), use `grok-4.5-console`.
 
 ### Function tools
 
@@ -696,7 +702,7 @@ Check the port mapping with `docker compose ps` (expect `0.0.0.0:8000->8000/tcp`
 In Admin → Config → Proxy, switch `proxy.clearance.mode` to `manual` with matching `cf_cookies` + `user_agent`, or deploy FlareSolverr and use `flaresolverr` mode. Or start the [anti-block stack](#anti-block-stack-warp--flaresolverr).
 
 **Q: `grok-4.5` fails with OIDC / auth errors.**  
-Ensure SSO→OIDC completed (auto on import, Admin batch convert, or `scripts/sso_to_oidc.py`). Check `data/oidc_auth.json`. On rate limits, lower `features.auto_oidc_workers` and raise `auto_oidc_batch_delay_sec`.
+`grok-4.5` uses CLI and needs SSO→OIDC (auto on import, Admin batch convert, or `scripts/sso_to_oidc.py`). Check `data/oidc_auth.json`. On rate limits, lower `features.auto_oidc_workers` and raise `auto_oidc_batch_delay_sec`. If you do not want OIDC, use `grok-4.5-console`.
 
 **Q: Multi-worker deployment.**  
 When `SERVER_WORKERS > 1`, the account refresh scheduler elects a single leader via a file lock; other workers only run lightweight syncing. On Windows, single-worker mode is recommended.

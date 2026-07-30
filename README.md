@@ -223,7 +223,8 @@ server {
 | :-- | :-- | :-- | :-- |
 | **付费账号** | grok.com / x.ai 的 `sso` Cookie | `grok-4.20-*`、`grok-4.3-beta`、Imagine 等 | 走官方 Web / 付费额度 |
 | **免费 Console** | `sso` + 可选 CF Clearance | `*-console`、`grok-4.3-{low,medium,high}` | 经 `console.x.ai` 路由 |
-| **CLI（grok-4.5）** | 同一 `sso`，运行时换 OIDC | `grok-4.5`、`grok-4.5-console` | 需 SSO→OIDC（可自动） |
+| **CLI（grok-4.5）** | 同一 `sso`，运行时换 OIDC | `grok-4.5` | 需 SSO→OIDC（可自动） |
+| **Console grok-4.5** | 同一 `sso`（Bearer） | `grok-4.5-console` | 走 `console.x.ai`，无需 OIDC |
 
 后台路径：**管理后台 → 账号**。批量粘贴 token 时支持 `sso=` 前缀，导入后会自动清洗。
 
@@ -250,6 +251,8 @@ server {
 ### CLI / grok-4.5（OIDC）
 
 `grok-4.5` 走 CLI 通道，需要 OIDC `access_token`（由 SSO 经 Device Flow 换取）。
+
+`grok-4.5-console` 走 `console.x.ai`，直接用 SSO 作为 Bearer，**不需要 OIDC**。
 
 默认行为（`config.defaults.toml`）：
 
@@ -413,7 +416,8 @@ uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
 | `grok-4.3-low` | 低思考 |
 | `grok-4.3-medium` | 中思考 |
 | `grok-4.3-high` | 高思考 |
-| `grok-4.5` / `grok-4.5-console` | CLI（OIDC） |
+| `grok-4.5` | CLI（OIDC） |
+| `grok-4.5-console` | Console（SSO） |
 | `grok-4.20-0309-console` | Console |
 | `grok-4.20-0309-non-reasoning-console` | Console 非推理 |
 | `grok-4.20-0309-reasoning-console` | Console 固定推理 |
@@ -515,6 +519,8 @@ curl http://localhost:8000/v1/chat/completions \
     ]
   }'
 ```
+
+Console（SSO，无需 OIDC）请用 `grok-4.5-console`。
 
 ### Function Tools
 
@@ -705,7 +711,7 @@ uv run python scripts/oidc_to_auth_array.py
 在管理后台 → 配置 → 代理中，将 `proxy.clearance.mode` 改为 `manual` 并填入匹配的 `cf_cookies` + `user_agent`；或部署 FlareSolverr 后改为 `flaresolverr` 模式。也可用 [防封部署](#防封部署warp--flaresolverr) 一键拉起。
 
 **Q：`grok-4.5` 报 OIDC / 鉴权相关错误。**  
-确认账号已完成 SSO→OIDC（导入自动转换、后台批量转换，或 `scripts/sso_to_oidc.py`）。查看 `data/oidc_auth.json` 是否有对应条目；限流时可调低 `features.auto_oidc_workers` 并增大 `auto_oidc_batch_delay_sec`。
+`grok-4.5` 走 CLI，需要完成 SSO→OIDC（导入自动转换、后台批量转换，或 `scripts/sso_to_oidc.py`）。查看 `data/oidc_auth.json` 是否有对应条目；限流时可调低 `features.auto_oidc_workers` 并增大 `auto_oidc_batch_delay_sec`。若不想依赖 OIDC，改用 `grok-4.5-console`。
 
 **Q：多 worker 部署。**  
 当 `SERVER_WORKERS > 1` 时，账号刷新调度通过文件锁选举唯一 leader，其余 worker 只做轻量同步。Windows 建议单 worker。

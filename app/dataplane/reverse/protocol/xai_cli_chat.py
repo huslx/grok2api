@@ -25,6 +25,7 @@ CLIENT_IDENTIFIER = "grok2api"
 # Clients may use friendly aliases (e.g. grok-4.5-console); upstream only knows grok-4.5.
 CLI_MODELS: dict[str, str] = {
     "grok-4.5": "grok-4.5",
+    # grok-4.5-console is CONSOLE_CHAT (console.x.ai); kept here only as a safe alias
     "grok-4.5-console": "grok-4.5",
 }
 
