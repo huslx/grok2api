@@ -158,6 +158,8 @@ timeout = 60
 cli_reasoning_effort = "medium"
 # CLI 换号次数下限（OIDC 未就绪时快速换号；≥ retry.max_retries）
 cli_account_retries = 8
+# Console（SSO）换号次数下限：池中失效 token 较多时，401 应多换几次而不是直接失败
+console_account_retries = 8
 # 最后一次仍无 OIDC 且进程内没有任何 warm 凭证时，才热路径 convert
 # （池中已有 warm 账号时只换号，避免无谓 ~10s 阻塞）
 cli_oidc_hot_convert_last_resort = true

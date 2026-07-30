@@ -215,11 +215,23 @@ def is_invalid_credentials_body(body: str) -> bool:
 
 
 def is_invalid_credentials_error(exc: BaseException) -> bool:
-    """Return whether *exc* indicates the account is invalid or blocked."""
+    """Return whether *exc* indicates the account is invalid or blocked.
+
+    HTTP 401 is always treated as an unusable SSO/session for our upstreams
+    (grok.com rate-limits, console.x.ai, etc.). Streaming console responses
+    often return an empty body on 401; requiring body markers would leave the
+    account ACTIVE in the DB, and incremental sync would revive it after the
+    hot-path marked it EXPIRED in memory — so the next request picks the same
+    dead token again. Callers that must not expire accounts on 401 (e.g. OIDC
+    warm-up) remaps those errors to a non-401 status before feedback.
+    """
     if not isinstance(exc, UpstreamError):
         return False
     if exc.status not in (400, 401, 403):
         return False
+    # Bare 401: expire + swap. Body markers still apply for 400/403.
+    if exc.status == 401:
+        return True
     return is_invalid_credentials_body(str(exc.details.get("body", "") or ""))
 
 

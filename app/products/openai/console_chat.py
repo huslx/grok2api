@@ -31,7 +31,7 @@ from app.dataplane.reverse.protocol.xai_console_chat import (
     ConsoleStreamAdapter,
     stream_console_chat,
 )
-from app.products._account_selection import reserve_account, selection_max_retries
+from app.products._account_selection import console_max_retries, reserve_account
 from app.products.openai.chat import _configured_retry_codes, _should_retry_upstream
 from ._format import (
     make_response_id,
@@ -112,7 +112,7 @@ async def completions(
     spec = resolve_model(model)
     effort = _reasoning_effort_from_emit_think(emit_think)
     timeout_s = cfg.get_float("chat.timeout", 120.0)
-    max_retries = selection_max_retries()
+    max_retries = console_max_retries()
     retry_codes = _configured_retry_codes(cfg)
     response_id = make_response_id()
     function_tool_names = client_function_tool_names(tools)

@@ -263,7 +263,7 @@ server {
 | `chat.cli_reasoning_effort` | `medium` | CLI 默认思考档位（可被请求覆盖） |
 | `chat.cli_account_retries` | `8` | OIDC 未就绪时换号次数下限 |
 
-也可手动转换：
+也可手动转换 / 刷新：
 
 - **管理后台**：账号页触发 OIDC 转换（API：`POST /admin/api/tokens/oidc-convert`）
 - **命令行**（见 [实用脚本](#实用脚本)）：
@@ -271,9 +271,20 @@ server {
 ```bash
 # 从本地 SQLite 账号库批量转换（示例：前 10 个，2 并发）
 uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
+
+# 查看本地 OIDC 有效期（data/oidc_auth.json）
+uv run python scripts/check_oidc.py
+uv run python scripts/check_oidc.py --only fresh
+
+# 用 refresh_token 批量续期（快，无需 Device Flow）
+uv run python scripts/check_oidc.py --refresh --only refreshable --workers 4
 ```
 
 运行时 OIDC 缓存默认写在 `${DATA_DIR}/oidc_auth.json`。
+
+- **有效期内**：直接复用 `access_token`；请求热路径上过期会自动 `refresh_token` 续期（非后台定时任务）。
+- **`refresh_token` 仍有效但 access 已过期**：可用 `scripts/check_oidc.py --refresh` 批量手动续期。
+- **`refresh_token` 失效**（`invalid_grant` / revoked）：需重新走 `scripts/sso_to_oidc.py` Device Flow。
 
 > SSO、CF Clearance、OIDC token 均为敏感凭证，切勿提交到代码仓库。
 
@@ -680,6 +691,7 @@ flaresolverr_url = "http://flaresolverr:8191"
 | 脚本 | 用途 |
 | :-- | :-- |
 | `scripts/sso_to_oidc.py` | SSO → OIDC（Device Flow），写入 `data/oidc_auth.json` |
+| `scripts/check_oidc.py` | 检查 OIDC 有效期；用 `refresh_token` 批量续期 |
 | `scripts/oidc_to_auth_array.py` | `oidc_auth.json` → grok CLI 风格 auth 数组 |
 | `scripts/oidc_to_sub2api.py` | `oidc_auth.json` → Sub2API 导入 JSON |
 | `scripts/init_proxy_config.py` | Compose 防封栈写入代理配置（容器内调用） |
@@ -692,6 +704,20 @@ uv run python scripts/sso_to_oidc.py --from-db --limit 10 --workers 2
 
 # 从 SSO 列表文件（每行一个 JWT，或 email----sso）
 uv run python scripts/sso_to_oidc.py --sso-file ./sso.txt --workers 4
+
+# 检查 OIDC 缓存：汇总 + 仍有效的账号
+uv run python scripts/check_oidc.py
+uv run python scripts/check_oidc.py --only fresh
+
+# 仅列出可 refresh（access 已过期 / 临近过期，且仍有 refresh_token）
+uv run python scripts/check_oidc.py --only refreshable --limit 20
+
+# 先 dry-run，再批量 refresh（默认只处理 accounts.db 中 active）
+uv run python scripts/check_oidc.py --refresh --only refreshable --limit 20 --dry-run
+uv run python scripts/check_oidc.py --refresh --only refreshable --workers 4
+
+# refresh 失败（invalid_grant / revoked）需重新 Device Flow
+uv run python scripts/sso_to_oidc.py --from-db --skip-existing --workers 2
 
 # 导出 CLI auth 数组
 uv run python scripts/oidc_to_auth_array.py
@@ -711,7 +737,15 @@ uv run python scripts/oidc_to_auth_array.py
 在管理后台 → 配置 → 代理中，将 `proxy.clearance.mode` 改为 `manual` 并填入匹配的 `cf_cookies` + `user_agent`；或部署 FlareSolverr 后改为 `flaresolverr` 模式。也可用 [防封部署](#防封部署warp--flaresolverr) 一键拉起。
 
 **Q：`grok-4.5` 报 OIDC / 鉴权相关错误。**  
-`grok-4.5` 走 CLI，需要完成 SSO→OIDC（导入自动转换、后台批量转换，或 `scripts/sso_to_oidc.py`）。查看 `data/oidc_auth.json` 是否有对应条目；限流时可调低 `features.auto_oidc_workers` 并增大 `auto_oidc_batch_delay_sec`。若不想依赖 OIDC，改用 `grok-4.5-console`。
+`grok-4.5` 走 CLI，需要完成 SSO→OIDC（导入自动转换、后台批量转换，或 `scripts/sso_to_oidc.py`）。查看 `data/oidc_auth.json` 是否有对应条目：
+
+```bash
+uv run python scripts/check_oidc.py --only fresh
+# access 过期但 refresh 仍可用时：
+uv run python scripts/check_oidc.py --refresh --only refreshable --workers 4
+```
+
+限流时可调低 `features.auto_oidc_workers` 并增大 `auto_oidc_batch_delay_sec`。`refresh_token` 已 revoked / invalid 时只能重新 Device Flow（`sso_to_oidc.py`）。若不想依赖 OIDC，改用 `grok-4.5-console`。
 
 **Q：多 worker 部署。**  
 当 `SERVER_WORKERS > 1` 时，账号刷新调度通过文件锁选举唯一 leader，其余 worker 只做轻量同步。Windows 建议单 worker。

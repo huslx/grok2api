@@ -11,6 +11,11 @@ from app.platform.config.snapshot import get_config
 # value without introducing scattered magic numbers.
 _RANDOM_MAX_RETRIES = 5
 
+# Console SSO pools often contain many expired tokens; a low quota-mode
+# ``retry.max_retries`` (default 1) surfaces 401 to the client before a live
+# account is found. Floor matches CLI's default account-swap budget.
+_CONSOLE_DEFAULT_ACCOUNT_RETRIES = 8
+
 
 def selection_max_retries() -> int:
     """Retry count for account-swap loops, aware of the active selection strategy.
@@ -22,6 +27,20 @@ def selection_max_retries() -> int:
     if current_strategy() == "random":
         return _RANDOM_MAX_RETRIES
     return int(get_config("retry.max_retries", 1))
+
+
+def console_max_retries() -> int:
+    """Account-swap budget for console.x.ai paths (SSO, no OIDC).
+
+    Takes the max of ``selection_max_retries()`` and
+    ``chat.console_account_retries`` (default 8) so dense pools of expired
+    SSO tokens can be skipped without failing the whole session.
+    """
+    base = selection_max_retries()
+    floor = int(
+        get_config("chat.console_account_retries", _CONSOLE_DEFAULT_ACCOUNT_RETRIES)
+    )
+    return max(base, max(0, floor))
 
 
 def mode_candidates(spec: ModelSpec) -> tuple[int, ...]:
@@ -89,3 +108,10 @@ async def reserve_account(
             return lease, selected_mode_id
 
     return None, original_mode_id
+
+__all__ = [
+    "selection_max_retries",
+    "console_max_retries",
+    "mode_candidates",
+    "reserve_account",
+]

@@ -91,24 +91,29 @@ def apply_server_error(table: AccountRuntimeTable, idx: int) -> None:
 def apply_status_change(
     table: AccountRuntimeTable, idx: int, new_status_id: int
 ) -> None:
-    """Update status column and refresh availability indexes."""
+    """Update status column and refresh availability indexes.
+
+    Non-ACTIVE statuses (EXPIRED / DISABLED / COOLING / DELETED) are always
+    removed from ``mode_available`` — including the no-op path where status
+    was already non-ACTIVE but a stale index entry might still exist.
+    """
     pool_id = int(table.pool_by_idx[idx])
     old_status = int(table.status_by_idx[idx])
 
-    if old_status == new_status_id:
-        return
-
-    table.status_by_idx[idx] = new_status_id
+    if old_status != new_status_id:
+        table.status_by_idx[idx] = new_status_id
 
     if new_status_id != int(StatusId.ACTIVE):
         for mode_id in ALL_MODE_IDS:
             bucket = table.mode_available.get((pool_id, mode_id))
             if bucket:
                 bucket.discard(idx)
-    else:
-        for mode_id in ALL_MODE_IDS:
-            if int(table._quota_col(mode_id)[idx]) > 0:
-                table.mode_available.setdefault((pool_id, mode_id), set()).add(idx)
+        return
+
+    # Restored / confirmed ACTIVE: re-index modes with remaining quota.
+    for mode_id in ALL_MODE_IDS:
+        if int(table._quota_col(mode_id)[idx]) > 0:
+            table.mode_available.setdefault((pool_id, mode_id), set()).add(idx)
 
 
 def apply_quota_update(

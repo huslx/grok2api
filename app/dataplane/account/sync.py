@@ -7,12 +7,18 @@ Two modes:
 
 from app.platform.logging.logger import logger
 from app.platform.runtime.clock import ms_to_s
+from app.control.account.enums import AccountStatus
 from app.control.account.models import AccountRecord
 from app.control.account.quota_defaults import normalize_quota_set
 from app.control.account.repository import AccountRepository
 from app.control.account.state_machine import derive_status
 from ..shared.enums import POOL_STR_TO_ID, STATUS_STR_TO_ID, StatusId
 from .table import AccountRuntimeTable, make_empty_table
+
+# Terminal / non-request statuses: keep out of the hot-path selection pool.
+# EXPIRED and DISABLED are never reserved for upstream calls; COOLING may
+# still be loaded so cooldown can expire back to ACTIVE via derive_status.
+_NON_REQUEST_STATUSES = frozenset({AccountStatus.EXPIRED, AccountStatus.DISABLED})
 
 
 def _record_to_slot_args(record: AccountRecord) -> dict:
@@ -82,6 +88,9 @@ async def bootstrap(repository: AccountRepository) -> AccountRuntimeTable:
     for record in snapshot.items:
         if record.is_deleted():
             continue
+        # Do not load expired/disabled tokens into the request pool at all.
+        if derive_status(record) in _NON_REQUEST_STATUSES:
+            continue
         args = _record_to_slot_args(record)
         tags = args.pop("tags")
         _tags_by_token[record.token] = tags
@@ -131,9 +140,26 @@ async def apply_changes(
                     changed = True
                 continue
 
+            effective = derive_status(record)
+            existing = table.idx_by_token.get(record.token)
+
+            # Expired / disabled: drop from request pool (indexes + optional slot).
+            if effective in _NON_REQUEST_STATUSES:
+                if existing is not None:
+                    table._remove_from_indexes(idx=existing)
+                    # Also clear tag preference so prefer_tokens cannot surface them.
+                    for tag, bucket in list(table.tag_idx.items()):
+                        if existing in bucket:
+                            bucket.discard(existing)
+                    table.status_by_idx[existing] = STATUS_STR_TO_ID.get(
+                        str(effective), int(StatusId.EXPIRED)
+                    )
+                    changed = True
+                # Never append a brand-new expired/disabled account into the hot table.
+                continue
+
             args = _record_to_slot_args(record)
             tags = args.pop("tags")
-            existing = table.idx_by_token.get(record.token)
 
             if existing is not None:
                 old_tags = []

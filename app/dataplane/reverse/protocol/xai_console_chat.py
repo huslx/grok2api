@@ -794,13 +794,30 @@ async def stream_console_chat(
             raise UpstreamError(f"Console transport failed: {exc}", status=502) from exc
 
         if response.status_code != 200:
+            body = ""
             try:
-                body = response.content.decode("utf-8", "replace")[:400]
+                # stream=True 时 response.content 常为空，必须先 drain aiter。
+                chunks: list[bytes] = []
+                async for part in response.aiter_content():
+                    if isinstance(part, str):
+                        part = part.encode("utf-8", "replace")
+                    chunks.append(part)
+                    if sum(len(c) for c in chunks) > 2000:
+                        break
+                if chunks:
+                    body = b"".join(chunks).decode("utf-8", "replace")[:500]
+                else:
+                    raw = getattr(response, "content", None) or b""
+                    if isinstance(raw, (bytes, bytearray)):
+                        body = bytes(raw).decode("utf-8", "replace")[:500]
+                    elif raw:
+                        body = str(raw)[:500]
             except Exception:
                 body = ""
             await proxy.feedback(lease, _status_feedback(response.status_code))
             raise UpstreamError(
-                f"Console API returned {response.status_code}",
+                f"Console API returned {response.status_code}"
+                + (f": {body[:240]}" if body else ""),
                 status=response.status_code,
                 body=body,
             )

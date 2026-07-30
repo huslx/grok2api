@@ -18,6 +18,7 @@ import random
 from typing import Literal
 
 from app.platform.config.snapshot import get_config
+from ..shared.enums import StatusId
 from .table import AccountRuntimeTable
 
 # Scoring weights used by the quota strategy.
@@ -147,10 +148,14 @@ def _quota_select(
     working: set[int] = candidates.copy()
     if exclude_idxs:
         working -= exclude_idxs
-    # B3: inflight 硬上限过滤，避免单账号堆积导致上游风控
+    # B3: inflight 硬上限过滤，避免单账号堆积导致上游风控。
+    # ACTIVE-only: EXPIRED/DISABLED 绝不进入请求池（防御 mode_available 脏数据）。
+    status_col = table.status_by_idx
+    active = int(StatusId.ACTIVE)
     working = {
         idx for idx in working
-        if int(quota_col[idx]) > 0
+        if int(status_col[idx]) == active
+        and int(quota_col[idx]) > 0
         and int(inflight_col[idx]) < _QUOTA_MAX_INFLIGHT
     }
     if not working:
@@ -178,6 +183,9 @@ def _quota_select_any(
     working = candidates.copy()
     if exclude_idxs:
         working -= exclude_idxs
+    status_col = table.status_by_idx
+    active = int(StatusId.ACTIVE)
+    working = {idx for idx in working if int(status_col[idx]) == active}
     if not working:
         return None
 
@@ -316,10 +324,14 @@ def _random_select(
     working = candidates.copy()
     if exclude_idxs:
         working -= exclude_idxs
-    # D2 修复：累计失败 >= _RANDOM_MAX_FAILS 的账号暂时排除，避免重复打到刚失败的账号
+    # D2 修复：累计失败 >= _RANDOM_MAX_FAILS 的账号暂时排除，避免重复打到刚失败的账号。
+    # ACTIVE-only：过期/禁用账号不参与随机选号。
+    status_col = table.status_by_idx
+    active = int(StatusId.ACTIVE)
     working = {
         idx for idx in working
-        if int(cooling_col[idx]) <= now_s
+        if int(status_col[idx]) == active
+        and int(cooling_col[idx]) <= now_s
         and int(inflight_col[idx]) < max_inflight
         and int(fail_col[idx]) < _RANDOM_MAX_FAILS
     }
