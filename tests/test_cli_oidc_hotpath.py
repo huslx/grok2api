@@ -150,7 +150,7 @@ def test_convert_oidc_one_skips_when_fresh() -> None:
         convert.assert_not_called()
 
 
-def test_should_hot_convert_only_when_no_warm() -> None:
+def test_should_hot_convert_only_on_last_attempt() -> None:
     from app.products.openai.cli_chat import _should_hot_convert
 
     oidc.cache_put(
@@ -161,14 +161,6 @@ def test_should_hot_convert_only_when_no_warm() -> None:
             "expires_at": time.time() + 3600,
         },
     )
-    # Pool already has warm OIDC → never block on last attempt.
-    assert (
-        _should_hot_convert(last_resort=True, attempt=8, max_retries=8) is False
-    )
-    # Clear warm index
-    oidc._WARM_HASHES.clear()
-    oidc._HASH_TO_SSO.clear()
-    oidc._OIDC_CACHE.clear()
     assert _should_hot_convert(last_resort=True, attempt=8, max_retries=8) is True
     assert _should_hot_convert(last_resort=True, attempt=3, max_retries=8) is False
     assert _should_hot_convert(last_resort=False, attempt=8, max_retries=8) is False
@@ -177,21 +169,11 @@ def test_should_hot_convert_only_when_no_warm() -> None:
 def test_poll_token_does_not_sleep_before_first_success() -> None:
     sleeps: list[float] = []
 
-    def fake_urlopen(req, timeout=20):  # noqa: ARG001
-        class _Resp:
-            def read(self):
-                return b'{"access_token":"t","refresh_token":"r","expires_in":3600}'
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
-        return _Resp()
+    def fake_post_form(url, data):  # noqa: ARG001
+        return 200, {"access_token": "t", "refresh_token": "r", "expires_in": 3600}, ""
 
     with patch.object(oidc.time, "sleep", side_effect=lambda s: sleeps.append(s)), patch.object(
-        oidc.urllib.request, "urlopen", side_effect=fake_urlopen
+        oidc, "_post_form", side_effect=fake_post_form
     ):
         data = oidc._poll_token("device", interval=5, expires_in=1800)
         assert data["access_token"] == "t"

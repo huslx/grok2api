@@ -25,7 +25,6 @@ from app.dataplane.reverse.protocol.xai_cli_chat import (
     stream_cli_chat,
 )
 from app.dataplane.reverse.protocol.xai_oidc import (
-    any_warm_oidc,
     list_warm_sso_tokens,
     resolve_oidc_access_token,
 )
@@ -164,17 +163,8 @@ def _should_hot_convert(
     attempt: int,
     max_retries: int,
 ) -> bool:
-    """Only block on device-flow when pool has no warm OIDC at all.
-
-    If any account already has a warm token, keep swapping (background repair
-    will fill the rest) instead of paying ~10s on the last attempt.
-    """
-    if not last_resort or attempt < max_retries:
-        return False
-    try:
-        return not any_warm_oidc()
-    except Exception:
-        return True
+    """Block on device-flow only for the final account-selection attempt."""
+    return last_resort and attempt >= max_retries
 
 
 async def _release_and_feedback(

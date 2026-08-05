@@ -13,9 +13,6 @@ import os
 import queue as _queue
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -206,26 +203,39 @@ def _drop_cred(sso_token: str) -> None:
         logger.warning("oidc drop disk entry failed: {}", exc)
 
 
-def _request_device_code() -> dict[str, Any]:
-    data = urllib.parse.urlencode(
-        {"client_id": GROK_CLI_CLIENT_ID, "scope": OIDC_SCOPES}
-    ).encode()
-    req = urllib.request.Request(
-        OIDC_DEVICE_URL,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+def _post_form(url: str, data: dict[str, str]) -> tuple[int, dict[str, Any], str]:
+    """POST an OIDC form through the same curl stack as other xAI requests."""
+    from curl_cffi import requests as crequests
+
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")[:300]
+        response = crequests.post(
+            url,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=20,
+        )
+    except Exception as exc:
+        raise UpstreamError(f"OIDC transport failed: {exc}", status=502) from exc
+    body = (response.text or "")[:300]
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    return response.status_code, payload if isinstance(payload, dict) else {}, body
+
+
+def _request_device_code() -> dict[str, Any]:
+    status, payload, body = _post_form(
+        OIDC_DEVICE_URL,
+        {"client_id": GROK_CLI_CLIENT_ID, "scope": OIDC_SCOPES},
+    )
+    if status != 200:
         raise UpstreamError(
-            f"OIDC device/code failed: {exc.code} {body}",
+            f"OIDC device/code failed: {status} {body}",
             status=502,
             body=body,
-        ) from exc
+        )
+    return payload
 
 
 def _poll_token(device_code: str, interval: int, expires_in: int) -> dict[str, Any]:
@@ -239,67 +249,48 @@ def _poll_token(device_code: str, interval: int, expires_in: int) -> dict[str, A
     wait = max(1, int(interval or 5))
     last_err = "authorization_pending"
     while time.time() < deadline:
-        data = urllib.parse.urlencode(
+        status, payload, body = _post_form(
+            OIDC_TOKEN_URL,
             {
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "client_id": GROK_CLI_CLIENT_ID,
                 "device_code": device_code,
-            }
-        ).encode()
-        req = urllib.request.Request(
-            OIDC_TOKEN_URL,
-            data=data,
-            method="POST",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            },
         )
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                return json.loads(resp.read())
-        except urllib.error.HTTPError as exc:
-            try:
-                err = json.loads(exc.read().decode("utf-8", "replace"))
-            except Exception:
-                err = {}
-            last_err = str(err.get("error") or exc.code)
-            if last_err == "authorization_pending":
-                time.sleep(wait)
-                continue
-            if last_err == "slow_down":
-                wait += 2
-                time.sleep(wait)
-                continue
-            raise UpstreamError(
-                f"OIDC token poll failed: {last_err}",
-                status=502,
-                body=str(err)[:300],
-            ) from exc
+        if status == 200:
+            return payload
+        last_err = str(payload.get("error") or status)
+        if last_err == "authorization_pending":
+            time.sleep(wait)
+            continue
+        if last_err == "slow_down":
+            wait += 2
+            time.sleep(wait)
+            continue
+        raise UpstreamError(
+            f"OIDC token poll failed: {last_err}",
+            status=502,
+            body=body,
+        )
     raise UpstreamError(f"OIDC token poll timeout: {last_err}", status=502)
 
 
 def _refresh_token(refresh_token: str) -> dict[str, Any]:
-    data = urllib.parse.urlencode(
+    status, payload, body = _post_form(
+        OIDC_TOKEN_URL,
         {
             "grant_type": "refresh_token",
             "client_id": GROK_CLI_CLIENT_ID,
             "refresh_token": refresh_token,
-        }
-    ).encode()
-    req = urllib.request.Request(
-        OIDC_TOKEN_URL,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")[:300]
+    if status != 200:
         raise UpstreamError(
-            f"OIDC refresh failed: {exc.code} {body}",
+            f"OIDC refresh failed: {status} {body}",
             status=401,
             body=body,
-        ) from exc
+        )
+    return payload
 
 
 def _sso_device_approve(sso_token: str, device: dict[str, Any]) -> None:
