@@ -1077,7 +1077,7 @@ function renderInput(field, section, value) {
   if (field.type === 'textarea') {
     const ta = _el('textarea', { class: 'cfg-textarea', id: `field-${section}-${field.key}`,
       rows: '3', placeholder: '' });
-    ta.value = value ?? '';
+    ta.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
     ta.addEventListener('input', () => onChange(ta.value));
     return ta;
   }

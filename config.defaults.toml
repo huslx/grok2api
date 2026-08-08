@@ -93,11 +93,11 @@ signed_url_ttl_sec = 604800
 mode = "direct"
 # 基础代理 URL（API 流量，single_proxy 模式必填）
 proxy_url = ""
-# 基础代理池（API 流量，proxy_pool 模式必填）
+# 基础代理池（API 流量，proxy_pool 模式下逐请求轮转）
 proxy_pool = []
 # 资源代理 URL（图片/视频下载，未配置则回落到 proxy_url）
 resource_proxy_url = ""
-# 资源代理池（图片/视频下载，未配置则回落到 proxy_pool）
+# 资源代理池（资源流量独立轮转，未配置则回落到 proxy_pool）
 resource_proxy_pool = []
 # 跳过代理 SSL 证书验证（代理使用自签名证书时启用）
 skip_ssl_verify = false

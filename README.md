@@ -337,8 +337,9 @@ uv run python scripts/check_oidc.py --refresh --only refreshable --workers 4
 | :-- | :-- | :-- |
 | `mode` | `direct` | `direct` / `single_proxy` / `proxy_pool` |
 | `proxy_url` | `""` | 单代理 URL（API 流量） |
-| `proxy_pool` | `[]` | 代理池 |
+| `proxy_pool` | `[]` | API 出口代理池，逐请求轮转 |
 | `resource_proxy_url` | `""` | 图片 / 视频下载代理；空则回落 `proxy_url` |
+| `resource_proxy_pool` | `[]` | 资源出口代理池，独立轮转；空则回落 `proxy_pool` |
 | `skip_ssl_verify` | `false` | 跳过代理 SSL 校验 |
 
 `[proxy.clearance]`：

@@ -121,7 +121,7 @@ class ConfigSnapshot:
         if isinstance(val, list):
             return val
         if isinstance(val, str):
-            return [p.strip() for p in val.split(",") if p.strip()]
+            return [p.strip() for p in val.replace("\n", ",").split(",") if p.strip()]
         return [val]
 
     async def update(self, patch: dict[str, Any]) -> None:

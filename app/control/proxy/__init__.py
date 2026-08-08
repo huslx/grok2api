@@ -55,9 +55,8 @@ class ProxyDirectory:
         self._egress_mode: EgressMode = EgressMode.DIRECT
         self._clearance_mode: ClearanceMode = ClearanceMode.NONE
         self._config_sig: tuple | None = None
-        # Pool cursor for PROXY_POOL mode: sticky routing with failure-driven rotate.
-        # Incremented on node failure; all callers see the same cursor under _lock.
-        self._pool_cursor: int = 0
+        # API and resource traffic rotate independently.
+        self._pool_cursors = {False: 0, True: 0}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -122,7 +121,7 @@ class ProxyDirectory:
             self._clearance_mode = clearance_mode
             self._nodes = nodes
             self._resource_nodes = resource_nodes
-            self._pool_cursor = 0
+            self._pool_cursors = {False: 0, True: 0}
             self._bundles = {
                 key: bundle.model_copy(update={"state": ClearanceBundleState.INVALID})
                 for key, bundle in self._bundles.items()
@@ -159,6 +158,7 @@ class ProxyDirectory:
 
         For DIRECT mode, returns a lease with no proxy or clearance.
         """
+        resource = resource or scope == ProxyScope.ASSET
         proxy_url = await self._pick_proxy_url(resource=resource)
         affinity = proxy_url or "direct"
         clearance_host = _clearance_host(clearance_origin)
@@ -197,29 +197,6 @@ class ProxyDirectory:
                         update={"state": ClearanceBundleState.INVALID}
                     )
 
-        # In PROXY_POOL mode, rotate to the next node on any failure so the
-        # next acquire() prefers a different egress rather than hammering the
-        # same broken node.
-        if (
-            self._egress_mode == EgressMode.PROXY_POOL
-            and lease.proxy_url
-            and result.kind
-            in (
-                ProxyFeedbackKind.CHALLENGE,
-                ProxyFeedbackKind.UNAUTHORIZED,
-                ProxyFeedbackKind.FORBIDDEN,
-                ProxyFeedbackKind.TRANSPORT_ERROR,
-            )
-        ):
-            async with self._lock:
-                self._pool_cursor += 1
-                logger.debug(
-                    "proxy pool cursor advanced: proxy={} kind={} cursor={}",
-                    lease.proxy_url,
-                    result.kind,
-                    self._pool_cursor,
-                )
-
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -238,8 +215,8 @@ class ProxyDirectory:
                 return None
             if self._egress_mode == EgressMode.SINGLE_PROXY:
                 return nodes[0].proxy_url
-            # PROXY_POOL: sticky routing — use current cursor, rotate on failure.
-            idx = self._pool_cursor % len(nodes)
+            idx = self._pool_cursors[resource] % len(nodes)
+            self._pool_cursors[resource] += 1
             return nodes[idx].proxy_url
 
     async def _get_or_build_bundle(
